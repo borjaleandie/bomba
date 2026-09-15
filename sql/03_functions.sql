@@ -163,3 +163,87 @@ create or replace view public.public_profiles as
   from public.profiles;
 
 grant select on public.public_profiles to authenticated;
+
+-- ---------------------------------------------------------
+-- start_game_round(p_room_id)
+-- THIS WAS MISSING — js/lobby.js calls this RPC to start a
+-- game, but it was never defined, so the room could end up
+-- marked "playing" with no current_round_id, which is why
+-- game.html was showing "no active round" errors.
+--
+-- Runs atomically as the host's request:
+--   1. Locks the room row (avoids a double-start race)
+--   2. Confirms the caller is the host
+--   3. Confirms the room is still "waiting"
+--   4. Confirms at least 2 active players, all ready
+--   5. Creates the game_rounds row
+--   6. Points game_rooms.current_round_id at it and flips
+--      status to "playing"
+--   7. Returns the new round row
+-- ---------------------------------------------------------
+create or replace function public.start_game_round(p_room_id uuid)
+returns public.game_rounds
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.game_rooms;
+  v_player_count int;
+  v_ready_count int;
+  v_round_number int;
+  v_round public.game_rounds;
+begin
+  select *
+  into v_room
+  from public.game_rooms
+  where id = p_room_id
+  for update;
+
+  if v_room is null then
+    raise exception 'Room not found.';
+  end if;
+
+  if v_room.host_id <> auth.uid() then
+    raise exception 'Only the host can start the game.';
+  end if;
+
+  if v_room.status <> 'waiting' then
+    raise exception 'Room is not waiting to start (status: %).', v_room.status;
+  end if;
+
+  select count(*),
+         count(*) filter (where is_ready)
+  into v_player_count, v_ready_count
+  from public.room_players
+  where room_id = p_room_id
+    and left_at is null;
+
+  if v_player_count < 2 then
+    raise exception 'Need at least 2 players to start.';
+  end if;
+
+  if v_ready_count <> v_player_count then
+    raise exception 'All players must be ready to start.';
+  end if;
+
+  select coalesce(max(round_number), 0) + 1
+  into v_round_number
+  from public.game_rounds
+  where room_id = p_room_id;
+
+  insert into public.game_rounds (room_id, round_number, map, status)
+  values (p_room_id, v_round_number, v_room.map, 'active')
+  returning * into v_round;
+
+  update public.game_rooms
+  set current_round_id = v_round.id,
+      status = 'playing',
+      started_at = now()
+  where id = p_room_id;
+
+  return v_round;
+end;
+$$;
+
+grant execute on function public.start_game_round(uuid) to authenticated;
