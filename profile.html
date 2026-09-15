@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+
+  <title>Profile — BOMB ARENA</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/mobile.css" />
+</head>
+
+<body>
+
+  <div class="page">
+
+    <div class="brand">
+      <span class="bomb-emoji">💣</span> BOMB ARENA
+    </div>
+
+
+    <!-- PROFILE -->
+    <div class="card" style="text-align:center;">
+
+      <img
+        id="avatarPreview"
+        src=""
+        alt="avatar"
+        style="
+          width:96px;
+          height:96px;
+          border-radius:50%;
+          object-fit:cover;
+          background:var(--color-bg-input);
+          border:2px solid var(--color-border);
+          display:none;
+        "
+      />
+
+      <div
+        id="avatarPlaceholder"
+        style="
+          width:96px;
+          height:96px;
+          border-radius:50%;
+          background:var(--color-bg-input);
+          margin:0 auto;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-size:40px;
+        "
+      >
+        🙂
+      </div>
+
+
+      <label
+        for="avatarInput"
+        class="btn btn-secondary"
+        style="
+          margin-top:14px;
+          display:inline-block;
+          width:auto;
+          padding:10px 18px;
+        "
+      >
+        CHANGE AVATAR
+      </label>
+
+      <input
+        type="file"
+        id="avatarInput"
+        accept="image/*"
+        style="display:none;"
+      />
+
+      <div id="avatarMsg" class="msg"></div>
+
+
+      <!-- USERNAME -->
+      <h2
+        id="usernameDisplay"
+        style="
+          margin-top:14px;
+          margin-bottom:5px;
+        "
+      >
+        Loading username...
+      </h2>
+
+      <div
+        id="fullNameDisplay"
+        style="color:var(--color-text-dim);"
+      ></div>
+
+      <div
+        id="emailDisplay"
+        style="
+          color:var(--color-text-dim);
+          font-size:13px;
+        "
+      ></div>
+
+    </div>
+
+
+    <!-- STATISTICS -->
+    <div class="card">
+
+      <h3>Statistics</h3>
+
+      <div
+        style="
+          display:flex;
+          justify-content:space-between;
+          text-align:center;
+        "
+      >
+
+        <div>
+          <div
+            id="statWins"
+            style="font-size:22px;font-weight:800;"
+          >
+            0
+          </div>
+
+          <div
+            style="
+              color:var(--color-text-dim);
+              font-size:12px;
+            "
+          >
+            WINS
+          </div>
+        </div>
+
+
+        <div>
+          <div
+            id="statKills"
+            style="font-size:22px;font-weight:800;"
+          >
+            0
+          </div>
+
+          <div
+            style="
+              color:var(--color-text-dim);
+              font-size:12px;
+            "
+          >
+            KILLS
+          </div>
+        </div>
+
+
+        <div>
+          <div
+            id="statDeaths"
+            style="font-size:22px;font-weight:800;"
+          >
+            0
+          </div>
+
+          <div
+            style="
+              color:var(--color-text-dim);
+              font-size:12px;
+            "
+          >
+            DEATHS
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- CHANGE USERNAME -->
+    <div class="card">
+
+      <h3>Change Username</h3>
+
+      <input
+        type="text"
+        id="newUsername"
+        placeholder="New username"
+        maxlength="20"
+      />
+
+      <button
+        id="saveUsernameBtn"
+        class="btn-secondary"
+      >
+        SAVE USERNAME
+      </button>
+
+      <div id="usernameMsg" class="msg"></div>
+
+    </div>
+
+
+    <!-- CHARACTER -->
+    <div class="card">
+
+      <a
+        href="character.html"
+        class="btn btn-outline"
+        style="display:block;"
+      >
+        🎨 CUSTOMIZE CHARACTER
+      </a>
+
+    </div>
+
+
+    <!-- BACK TO HOME -->
+    <a
+      href="index.html"
+      class="btn btn-secondary"
+      style="
+        display:block;
+        text-align:center;
+      "
+    >
+      BACK TO HOME
+    </a>
+
+
+    <!-- LOGOUT -->
+    <button
+      id="logoutBtn"
+      class="btn-secondary"
+    >
+      LOGOUT
+    </button>
+
+  </div>
+
+
+  <!-- SCRIPTS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/profile.js"></script>
+
+
+  <script>
+
+    let currentUser = null;
+
+
+    /*
+     * LOAD PROFILE
+     *
+     * Every time profile.html is opened,
+     * the username is loaded directly from
+     * public.profiles.
+     */
+    async function initializeProfile() {
+
+      try {
+
+        currentUser = await requireAuth();
+
+        if (!currentUser) {
+          return;
+        }
+
+
+        console.log("Logged-in user:", currentUser.id);
+
+
+        const profile = await loadProfileData(
+          currentUser.id
+        );
+
+
+        console.log("Profile loaded:", profile);
+
+
+        renderProfile(profile);
+
+
+} catch (err) {
+
+  console.error(
+    "Profile initialization error:",
+    err
+  );
+
+  document.getElementById(
+    "usernameDisplay"
+  ).textContent =
+    "ERROR: " + (err.message || "Unknown error");
+
+}
+
+    }
+
+
+    /*
+     * DISPLAY PROFILE
+     */
+    function renderProfile(p) {
+
+      /*
+       * USERNAME
+       *
+       * This comes from public.profiles.username.
+       */
+      document.getElementById(
+        "usernameDisplay"
+      ).textContent =
+        "@" + (p.username || "Player");
+
+
+      document.getElementById(
+        "fullNameDisplay"
+      ).textContent =
+        p.full_name || "";
+
+
+      document.getElementById(
+        "emailDisplay"
+      ).textContent =
+        p.email || "";
+
+
+      document.getElementById(
+        "statWins"
+      ).textContent =
+        p.total_wins ?? 0;
+
+
+      document.getElementById(
+        "statKills"
+      ).textContent =
+        p.total_kills ?? 0;
+
+
+      document.getElementById(
+        "statDeaths"
+      ).textContent =
+        p.total_deaths ?? 0;
+
+
+      /*
+       * Avatar
+       */
+      if (p.avatar_url) {
+
+        document.getElementById(
+          "avatarPreview"
+        ).src = p.avatar_url;
+
+        document.getElementById(
+          "avatarPreview"
+        ).style.display = "block";
+
+        document.getElementById(
+          "avatarPlaceholder"
+        ).style.display = "none";
+
+      }
+
+    }
+
+
+    /*
+     * CHANGE AVATAR
+     */
+    document.getElementById(
+      "avatarInput"
+    ).addEventListener(
+      "change",
+      async (e) => {
+
+        const file = e.target.files[0];
+
+        if (!file) return;
+
+
+        const avatarMsg =
+          document.getElementById(
+            "avatarMsg"
+          );
+
+
+        avatarMsg.className = "msg";
+
+
+        try {
+
+          const url =
+            await uploadAvatar(
+              currentUser.id,
+              file
+            );
+
+
+          document.getElementById(
+            "avatarPreview"
+          ).src = url;
+
+
+          document.getElementById(
+            "avatarPreview"
+          ).style.display = "block";
+
+
+          document.getElementById(
+            "avatarPlaceholder"
+          ).style.display = "none";
+
+
+          avatarMsg.className =
+            "msg success";
+
+          avatarMsg.textContent =
+            "Avatar updated!";
+
+
+        } catch (err) {
+
+          console.error(err);
+
+          avatarMsg.className =
+            "msg error";
+
+          avatarMsg.textContent =
+            err.message ||
+            "Upload failed.";
+
+        }
+
+      }
+    );
+
+
+    /*
+     * SAVE USERNAME
+     */
+    document.getElementById(
+      "saveUsernameBtn"
+    ).addEventListener(
+      "click",
+      async () => {
+
+        const usernameMsg =
+          document.getElementById(
+            "usernameMsg"
+          );
+
+
+        const newUsername =
+          document.getElementById(
+            "newUsername"
+          ).value.trim();
+
+
+        usernameMsg.className = "msg";
+        usernameMsg.textContent = "";
+
+
+        if (!newUsername) {
+
+          usernameMsg.className =
+            "msg error";
+
+          usernameMsg.textContent =
+            "Please enter a username.";
+
+          return;
+
+        }
+
+
+        try {
+
+          const updated =
+            await updateUsername(
+              currentUser.id,
+              newUsername
+            );
+
+
+          /*
+           * Immediately display
+           * the username returned
+           * from Supabase.
+           */
+          document.getElementById(
+            "usernameDisplay"
+          ).textContent =
+            "@" + updated.username;
+
+
+          /*
+           * Clear input.
+           */
+          document.getElementById(
+            "newUsername"
+          ).value = "";
+
+
+          usernameMsg.className =
+            "msg success";
+
+          usernameMsg.textContent =
+            "Username updated successfully!";
+
+
+          console.log(
+            "Username saved:",
+            updated.username
+          );
+
+
+        } catch (err) {
+
+          console.error(
+            "Username update error:",
+            err
+          );
+
+
+          usernameMsg.className =
+            "msg error";
+
+          usernameMsg.textContent =
+            err.message ||
+            "Could not update username.";
+
+        }
+
+      }
+    );
+
+
+    /*
+     * LOGOUT
+     */
+    document.getElementById(
+      "logoutBtn"
+    ).addEventListener(
+      "click",
+      logoutUser
+    );
+
+
+    /*
+     * START
+     */
+    initializeProfile();
+
+  </script>
+
+</body>
+</html>

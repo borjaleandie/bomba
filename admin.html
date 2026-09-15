@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+
+  <title>Admin Dashboard — BOMB ARENA</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+</head>
+
+<body>
+
+  <div class="page" style="max-width:720px;">
+
+    <!-- ACCESS DENIED -->
+    <div id="deniedState" class="hidden card" style="text-align:center;">
+      <h2>🚫 Access Denied</h2>
+      <p style="color:var(--color-text-dim);">
+        This page is for administrators only.
+      </p>
+
+      <a href="index.html" class="btn">
+        BACK TO MENU
+      </a>
+    </div>
+
+
+    <!-- ADMIN CONTENT -->
+    <div id="adminContent" class="hidden">
+
+      <div class="brand" style="font-size:22px;">
+        🛠️ ADMIN DASHBOARD
+      </div>
+
+
+      <!-- OVERVIEW -->
+      <div class="stats-grid" id="overviewStats"></div>
+
+
+      <!-- TABS -->
+      <div class="tab-bar">
+
+        <button class="tab-btn active" data-tab="users">
+          Users
+        </button>
+
+        <button class="tab-btn" data-tab="rooms">
+          Rooms
+        </button>
+
+        <button class="tab-btn" data-tab="chat">
+          Chat
+        </button>
+
+        <button class="tab-btn" data-tab="reports">
+          Reports
+        </button>
+
+      </div>
+
+
+      <!-- =====================================================
+           USERS
+      ====================================================== -->
+
+      <div class="tab-panel" id="tab-users">
+
+        <!-- USER SEARCH -->
+        <div
+          style="
+            display:flex;
+            gap:8px;
+            margin-bottom:12px;
+          "
+        >
+
+          <input
+            type="text"
+            id="userSearch"
+            placeholder="Search username or email..."
+            style="flex:1;"
+          />
+
+          <button
+            id="userSearchBtn"
+            class="btn-small"
+            type="button"
+          >
+            SEARCH
+          </button>
+
+        </div>
+
+        <div id="usersList"></div>
+
+      </div>
+
+
+      <!-- =====================================================
+           ROOMS
+      ====================================================== -->
+
+      <div class="tab-panel hidden" id="tab-rooms">
+
+        <div id="roomsList"></div>
+
+        <div
+          id="roomDetail"
+          class="hidden card"
+        ></div>
+
+      </div>
+
+
+      <!-- =====================================================
+           CHAT
+      ====================================================== -->
+
+      <div class="tab-panel hidden" id="tab-chat">
+
+        <!-- MESSAGE SEARCH -->
+        <div
+          style="
+            display:flex;
+            gap:8px;
+            margin-bottom:12px;
+          "
+        >
+
+          <input
+            type="text"
+            id="messageSearch"
+            placeholder="Search message text..."
+            style="flex:1;"
+          />
+
+          <button
+            id="messageSearchBtn"
+            class="btn-small"
+            type="button"
+          >
+            SEARCH
+          </button>
+
+        </div>
+
+        <div id="messagesList"></div>
+
+      </div>
+
+
+      <!-- =====================================================
+           REPORTS
+      ====================================================== -->
+
+      <div class="tab-panel hidden" id="tab-reports">
+
+        <select id="reportStatusFilter">
+
+          <option value="pending">
+            Pending
+          </option>
+
+          <option value="reviewed">
+            Reviewed
+          </option>
+
+          <option value="resolved">
+            Resolved
+          </option>
+
+          <option value="all">
+            All
+          </option>
+
+        </select>
+
+        <div id="reportsList"></div>
+
+      </div>
+
+
+      <!-- BACK TO MENU -->
+      <a
+        href="index.html"
+        class="btn btn-secondary"
+      >
+        BACK TO MENU
+      </a>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       SCRIPTS
+  ====================================================== -->
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/character.js"></script>
+  <script src="js/lobby.js"></script>
+  <script src="js/admin.js"></script>
+
+
+  <script>
+
+    let currentUser = null;
+
+
+    // =====================================================
+    // INITIALIZE ADMIN DASHBOARD
+    // =====================================================
+
+    async function init() {
+
+      try {
+
+        currentUser = await requireAuth();
+
+        if (!currentUser) {
+          return;
+        }
+
+
+        // Check administrator permission
+        const admin = await isCurrentUserAdmin(
+          currentUser.id
+        );
+
+
+        if (!admin) {
+
+          document
+            .getElementById("deniedState")
+            .classList.remove("hidden");
+
+          return;
+        }
+
+
+        // Show admin dashboard
+        document
+          .getElementById("adminContent")
+          .classList.remove("hidden");
+
+
+        // Load initial data
+        await loadOverview();
+
+        await loadUsers();
+
+
+        // =================================================
+        // TAB BUTTONS
+        // =================================================
+
+        document
+          .querySelectorAll(".tab-btn")
+          .forEach((btn) => {
+
+            btn.addEventListener(
+              "click",
+              () => switchTab(btn.dataset.tab)
+            );
+
+          });
+
+
+        // =================================================
+        // USER SEARCH BUTTON
+        // =================================================
+
+        document
+          .getElementById("userSearchBtn")
+          .addEventListener(
+            "click",
+            loadUsers
+          );
+
+
+        // Search users when pressing ENTER
+        document
+          .getElementById("userSearch")
+          .addEventListener(
+            "keydown",
+            (e) => {
+
+              if (e.key === "Enter") {
+                loadUsers();
+              }
+
+            }
+          );
+
+
+        // =================================================
+        // CHAT SEARCH BUTTON
+        // =================================================
+
+        document
+          .getElementById("messageSearchBtn")
+          .addEventListener(
+            "click",
+            loadMessages
+          );
+
+
+        // Search messages when pressing ENTER
+        document
+          .getElementById("messageSearch")
+          .addEventListener(
+            "keydown",
+            (e) => {
+
+              if (e.key === "Enter") {
+                loadMessages();
+              }
+
+            }
+          );
+
+
+        // =================================================
+        // REPORT FILTER
+        // =================================================
+
+        document
+          .getElementById("reportStatusFilter")
+          .addEventListener(
+            "change",
+            loadReports
+          );
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Admin initialization error:",
+          error
+        );
+
+        alert(
+          error.message ||
+          "Could not load admin dashboard."
+        );
+
+      }
+
+    }
+
+
+    // =====================================================
+    // SWITCH TAB
+    // =====================================================
+
+    function switchTab(tab) {
+
+      document
+        .querySelectorAll(".tab-btn")
+        .forEach((b) => {
+
+          b.classList.toggle(
+            "active",
+            b.dataset.tab === tab
+          );
+
+        });
+
+
+      document
+        .querySelectorAll(".tab-panel")
+        .forEach((p) => {
+
+          p.classList.toggle(
+            "hidden",
+            p.id !== "tab-" + tab
+          );
+
+        });
+
+
+      if (tab === "rooms") {
+        loadRooms();
+      }
+
+      if (tab === "chat") {
+        loadMessages();
+      }
+
+      if (tab === "reports") {
+        loadReports();
+      }
+
+    }
+
+
+    // =====================================================
+    // OVERVIEW
+    // =====================================================
+
+    async function loadOverview() {
+
+      const c = await fetchOverviewCounts();
+
+
+      document.getElementById(
+        "overviewStats"
+      ).innerHTML = `
+
+        <div class="stat-box">
+
+          <div class="stat-num">
+            ${c.userCount}
+          </div>
+
+          <div class="stat-label">
+            Users
+          </div>
+
+        </div>
+
+
+        <div class="stat-box">
+
+          <div class="stat-num">
+            ${c.activeRoomCount}
+          </div>
+
+          <div class="stat-label">
+            Active Rooms
+          </div>
+
+        </div>
+
+
+        <div class="stat-box">
+
+          <div class="stat-num">
+            ${c.completedGameCount}
+          </div>
+
+          <div class="stat-label">
+            Completed Games
+          </div>
+
+        </div>
+
+
+        <div class="stat-box">
+
+          <div class="stat-num">
+            ${c.pendingReportCount}
+          </div>
+
+          <div class="stat-label">
+            Pending Reports
+          </div>
+
+        </div>
+
+      `;
+
+    }
+
+
+    // =====================================================
+    // USERS
+    // =====================================================
+
+    async function loadUsers() {
+
+      try {
+
+        const term =
+          document
+            .getElementById("userSearch")
+            .value
+            .trim();
+
+
+        const users =
+          await fetchUsers(term);
+
+
+        const list =
+          document.getElementById("usersList");
+
+
+        list.innerHTML = "";
+
+
+        if (!users || users.length === 0) {
+
+          list.innerHTML = `
+            <p style="color:var(--color-text-dim);">
+              No users found.
+            </p>
+          `;
+
+          return;
+        }
+
+
+        users.forEach((u) => {
+
+          const row =
+            document.createElement("div");
+
+
+          row.className = "admin-row";
+
+
+          row.innerHTML = `
+
+            <div class="admin-row-main">
+
+              <div class="admin-row-title">
+
+                ${u.username}
+
+                <span class="tag">
+                  ${u.role}
+                </span>
+
+                <span
+                  class="
+                    tag
+                    ${u.account_status === "disabled"
+                      ? "tag-danger"
+                      : "tag-ok"}
+                  "
+                >
+                  ${u.account_status}
+                </span>
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                ${u.email}
+
+                · Wins: ${u.total_wins}
+
+                · Kills: ${u.total_kills}
+
+                · Deaths: ${u.total_deaths}
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                Joined:
+                ${new Date(u.created_at)
+                  .toLocaleDateString()}
+
+                · Last active:
+                ${u.last_active
+                  ? new Date(u.last_active)
+                      .toLocaleString()
+                  : "Never"}
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-row-actions">
+
+              <button
+                class="btn-small"
+                data-action="toggle-status"
+                data-id="${u.id}"
+                data-status="${u.account_status}"
+              >
+
+                ${
+                  u.account_status === "active"
+                    ? "Disable"
+                    : "Enable"
+                }
+
+              </button>
+
+
+              <button
+                class="btn-small"
+                data-action="toggle-role"
+                data-id="${u.id}"
+                data-role="${u.role}"
+              >
+
+                ${
+                  u.role === "admin"
+                    ? "Revoke Admin"
+                    : "Make Admin"
+                }
+
+              </button>
+
+            </div>
+
+          `;
+
+
+          list.appendChild(row);
+
+        });
+
+
+        // =================================================
+        // ACCOUNT STATUS BUTTON
+        // =================================================
+
+        list
+          .querySelectorAll(
+            '[data-action="toggle-status"]'
+          )
+          .forEach((btn) => {
+
+            btn.addEventListener(
+              "click",
+              async () => {
+
+                const newStatus =
+                  btn.dataset.status === "active"
+                    ? "disabled"
+                    : "active";
+
+
+                if (
+                  !confirm(
+                    `Set this user's account to "${newStatus}"?`
+                  )
+                ) {
+                  return;
+                }
+
+
+                try {
+
+                  await setAccountStatus(
+                    btn.dataset.id,
+                    newStatus
+                  );
+
+                  await loadUsers();
+
+                }
+
+                catch (e) {
+
+                  alert(e.message);
+
+                }
+
+              }
+            );
+
+          });
+
+
+        // =================================================
+        // ROLE BUTTON
+        // =================================================
+
+        list
+          .querySelectorAll(
+            '[data-action="toggle-role"]'
+          )
+          .forEach((btn) => {
+
+            btn.addEventListener(
+              "click",
+              async () => {
+
+                const newRole =
+                  btn.dataset.role === "admin"
+                    ? "user"
+                    : "admin";
+
+
+                if (
+                  !confirm(
+                    `Set this user's role to "${newRole}"?`
+                  )
+                ) {
+                  return;
+                }
+
+
+                try {
+
+                  await setUserRole(
+                    btn.dataset.id,
+                    newRole
+                  );
+
+                  await loadUsers();
+
+                }
+
+                catch (e) {
+
+                  alert(e.message);
+
+                }
+
+              }
+            );
+
+          });
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Load users error:",
+          error
+        );
+
+        document.getElementById(
+          "usersList"
+        ).innerHTML = `
+
+          <p style="color:#ff6b6b;">
+            Could not load users:
+            ${error.message}
+          </p>
+
+        `;
+
+      }
+
+    }
+
+
+    // =====================================================
+    // ROOMS
+    // =====================================================
+
+    async function loadRooms() {
+
+      try {
+
+        const rooms =
+          await fetchActiveRooms();
+
+
+        const list =
+          document.getElementById("roomsList");
+
+
+        list.innerHTML = "";
+
+
+        rooms.forEach((r) => {
+
+          const row =
+            document.createElement("div");
+
+
+          row.className =
+            "admin-row";
+
+
+          row.innerHTML = `
+
+            <div class="admin-row-main">
+
+              <div class="admin-row-title">
+
+                ${r.room_code}
+                —
+                ${r.room_name}
+
+                <span class="tag">
+                  ${r.status.toUpperCase()}
+                </span>
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                Host:
+                ${r.hostUsername}
+
+                ·
+                ${r.playerCount}
+                /
+                ${r.player_limit}
+                players
+
+                ·
+                ${r.map}
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-row-actions">
+
+              <button
+                class="btn-small"
+                data-view-room="${r.id}"
+              >
+                View
+              </button>
+
+            </div>
+
+          `;
+
+
+          list.appendChild(row);
+
+        });
+
+
+        if (rooms.length === 0) {
+
+          list.innerHTML = `
+
+            <p style="color:var(--color-text-dim);">
+              No active rooms right now.
+            </p>
+
+          `;
+
+        }
+
+
+        list
+          .querySelectorAll(
+            "[data-view-room]"
+          )
+          .forEach((btn) => {
+
+            btn.addEventListener(
+              "click",
+              () =>
+                viewRoomDetail(
+                  btn.dataset.viewRoom
+                )
+            );
+
+          });
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Load rooms error:",
+          error
+        );
+
+        document.getElementById(
+          "roomsList"
+        ).innerHTML = `
+
+          <p style="color:#ff6b6b;">
+            Could not load rooms:
+            ${error.message}
+          </p>
+
+        `;
+
+      }
+
+    }
+
+
+    // =====================================================
+    // ROOM DETAIL
+    // =====================================================
+
+    async function viewRoomDetail(roomId) {
+
+      try {
+
+        const {
+          room,
+          players
+        } = await fetchRoomDetail(roomId);
+
+
+        const detail =
+          document.getElementById(
+            "roomDetail"
+          );
+
+
+        detail.classList.remove(
+          "hidden"
+        );
+
+
+        detail.innerHTML = `
+
+          <h3>
+            ${room.room_code}
+            —
+            ${room.room_name}
+          </h3>
+
+
+          <p
+            style="
+              color:var(--color-text-dim);
+              font-size:13px;
+            "
+          >
+
+            Status:
+            ${room.status}
+
+            · Map:
+            ${room.map}
+
+            · Limit:
+            ${room.player_limit}
+
+            · Started:
+            ${
+              room.started_at
+                ? new Date(
+                    room.started_at
+                  ).toLocaleString()
+                : "not yet"
+            }
+
+          </p>
+
+
+          <div>
+
+            ${
+              players.length
+                ? players
+                    .map(
+                      (p) => `
+                        <div class="admin-row-sub">
+
+                          ${
+                            p.is_host
+                              ? "👑 "
+                              : ""
+                          }
+
+                          ${p.username}
+
+                          —
+                          ${
+                            p.is_ready
+                              ? "Ready"
+                              : "Not ready"
+                          }
+
+                        </div>
+                      `
+                    )
+                    .join("")
+                : `
+                  <p
+                    style="
+                      color:var(--color-text-dim);
+                    "
+                  >
+                    No players.
+                  </p>
+                `
+            }
+
+          </div>
+
+        `;
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Room detail error:",
+          error
+        );
+
+        alert(error.message);
+
+      }
+
+    }
+
+
+    // =====================================================
+    // CHAT MODERATION
+    // =====================================================
+
+    async function loadMessages() {
+
+      try {
+
+        const term =
+          document
+            .getElementById("messageSearch")
+            .value
+            .trim();
+
+
+        const messages =
+          await fetchRecentMessagesForModeration(
+            term
+          );
+
+
+        const list =
+          document.getElementById(
+            "messagesList"
+          );
+
+
+        list.innerHTML = "";
+
+
+        if (
+          !messages ||
+          messages.length === 0
+        ) {
+
+          list.innerHTML = `
+
+            <p
+              style="
+                color:var(--color-text-dim);
+              "
+            >
+              No messages found.
+            </p>
+
+          `;
+
+          return;
+
+        }
+
+
+        messages.forEach((m) => {
+
+          const row =
+            document.createElement("div");
+
+
+          row.className =
+            "admin-row";
+
+
+          row.innerHTML = `
+
+            <div class="admin-row-main">
+
+              <div class="admin-row-title">
+
+                ${m.username}
+
+                <span class="tag">
+                  ${m.roomCode}
+                </span>
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                ${
+                  m.deleted
+                    ? "<i>[deleted]</i>"
+                    : m.message
+                }
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                ${new Date(
+                  m.created_at
+                ).toLocaleString()}
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-row-actions">
+
+              ${
+                !m.deleted
+                  ? `
+                    <button
+                      class="btn-small btn-danger"
+                      data-delete-msg="${m.id}"
+                    >
+                      Delete
+                    </button>
+                  `
+                  : ""
+              }
+
+            </div>
+
+          `;
+
+
+          list.appendChild(row);
+
+        });
+
+
+        // DELETE MESSAGE
+        list
+          .querySelectorAll(
+            "[data-delete-msg]"
+          )
+          .forEach((btn) => {
+
+            btn.addEventListener(
+              "click",
+              async () => {
+
+                if (
+                  !confirm(
+                    "Delete this message permanently?"
+                  )
+                ) {
+                  return;
+                }
+
+
+                try {
+
+                  await adminDeleteMessage(
+                    btn.dataset.deleteMsg
+                  );
+
+                  await loadMessages();
+
+                }
+
+                catch (e) {
+
+                  alert(e.message);
+
+                }
+
+              }
+            );
+
+          });
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Load messages error:",
+          error
+        );
+
+        document.getElementById(
+          "messagesList"
+        ).innerHTML = `
+
+          <p style="color:#ff6b6b;">
+            Could not load messages:
+            ${error.message}
+          </p>
+
+        `;
+
+      }
+
+    }
+
+
+    // =====================================================
+    // REPORTS
+    // =====================================================
+
+    async function loadReports() {
+
+      try {
+
+        const status =
+          document
+            .getElementById(
+              "reportStatusFilter"
+            )
+            .value;
+
+
+        const reports =
+          await fetchReports(status);
+
+
+        const list =
+          document.getElementById(
+            "reportsList"
+          );
+
+
+        list.innerHTML = "";
+
+
+        reports.forEach((r) => {
+
+          const row =
+            document.createElement("div");
+
+
+          row.className =
+            "admin-row";
+
+
+          row.innerHTML = `
+
+            <div class="admin-row-main">
+
+              <div class="admin-row-title">
+
+                Reported:
+                ${r.reportedUsername || "N/A"}
+
+                <span class="tag">
+                  ${r.status}
+                </span>
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                By
+                ${r.reporterUsername}
+
+                ·
+                ${new Date(
+                  r.created_at
+                ).toLocaleString()}
+
+              </div>
+
+
+              <div class="admin-row-sub">
+
+                Reason:
+                ${r.reason}
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-row-actions">
+
+              <select
+                data-report-status="${r.id}"
+              >
+
+                <option
+                  value="pending"
+                  ${
+                    r.status === "pending"
+                      ? "selected"
+                      : ""
+                  }
+                >
+                  Pending
+                </option>
+
+
+                <option
+                  value="reviewed"
+                  ${
+                    r.status === "reviewed"
+                      ? "selected"
+                      : ""
+                  }
+                >
+                  Reviewed
+                </option>
+
+
+                <option
+                  value="resolved"
+                  ${
+                    r.status === "resolved"
+                      ? "selected"
+                      : ""
+                  }
+                >
+                  Resolved
+                </option>
+
+              </select>
+
+            </div>
+
+          `;
+
+
+          list.appendChild(row);
+
+        });
+
+
+        if (reports.length === 0) {
+
+          list.innerHTML = `
+
+            <p
+              style="
+                color:var(--color-text-dim);
+              "
+            >
+              No reports found.
+            </p>
+
+          `;
+
+        }
+
+
+        // UPDATE REPORT STATUS
+        list
+          .querySelectorAll(
+            "[data-report-status]"
+          )
+          .forEach((sel) => {
+
+            sel.addEventListener(
+              "change",
+              async () => {
+
+                try {
+
+                  await updateReportStatus(
+                    sel.dataset.reportStatus,
+                    sel.value
+                  );
+
+                }
+
+                catch (e) {
+
+                  alert(e.message);
+
+                }
+
+              }
+            );
+
+          });
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "Load reports error:",
+          error
+        );
+
+        document.getElementById(
+          "reportsList"
+        ).innerHTML = `
+
+          <p style="color:#ff6b6b;">
+            Could not load reports:
+            ${error.message}
+          </p>
+
+        `;
+
+      }
+
+    }
+
+
+    // =====================================================
+    // START
+    // =====================================================
+
+    init();
+
+  </script>
+
+</body>
+</html>

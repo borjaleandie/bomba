@@ -1,0 +1,43 @@
+/* =========================================================
+   BOMB ARENA — mobile.css
+   Bottom navigation + mobile-specific overrides.
+   Included AFTER style.css on pages that show the bottom nav.
+   ========================================================= */
+
+.bottom-nav {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  background: var(--color-bg-card);
+  border-top: 1px solid var(--color-border);
+  padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  z-index: 50;
+}
+
+.bottom-nav a {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  border-radius: 10px;
+}
+
+.bottom-nav a.active {
+  color: var(--color-accent);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.bottom-nav .icon { font-size: 20px; line-height: 1; }
+
+/* Larger tap targets + spacing on small screens */
+@media (max-width: 380px) {
+  .page { padding-left: 16px; padding-right: 16px; }
+  .brand { font-size: 24px; }
+}
+
+/* Avoid important controls sitting under phone notches/home-indicators */
+.page { padding-top: max(24px, env(safe-area-inset-top)); }

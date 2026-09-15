@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>BOMB ARENA</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/mobile.css" />
+  <style>
+    .menu-item {
+      display:flex; align-items:center; gap:14px;
+      padding: 16px; margin-bottom: 10px;
+      background: var(--color-bg-card); border:1px solid var(--color-border);
+      border-radius: var(--radius); font-weight:700; font-size:16px;
+    }
+    .menu-item .icon { font-size: 22px; width: 28px; text-align:center; }
+    .menu-item.disabled { opacity: 0.4; }
+    .menu-item .soon { margin-left:auto; font-size:11px; font-weight:600; color: var(--color-text-dim); text-transform:uppercase; }
+    .menu-item.admin { border-color: var(--color-accent); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="brand" style="font-size:32px;">💣 BOMB ARENA</div>
+
+    <!-- LOGGED OUT VIEW -->
+    <div id="loggedOutView" class="hidden">
+      <p style="text-align:center;color:var(--color-text-dim);">Mobile multiplayer bomb-throwing survival arena.</p>
+      <a href="login.html" class="btn">LOG IN</a>
+      <a href="register.html" class="btn btn-secondary">REGISTER</a>
+    </div>
+
+    <!-- LOGGED IN MAIN MENU -->
+    <div id="menuView" class="hidden">
+      <div id="menuList"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script>
+    // Menu items: href=null means "not built yet in this phase"
+    const MENU_ITEMS = [
+      { icon: "🕹️", label: "CREATE ROOM", href: "create-room.html" },
+      { icon: "🔑", label: "JOIN ROOM", href: "join-room.html" },
+      { icon: "🎨", label: "CHARACTER", href: "character.html" },
+      { icon: "👤", label: "PROFILE", href: "profile.html" },
+      { icon: "💬", label: "CHAT", href: null },
+      { icon: "🏆", label: "LEADERBOARD", href: "leaderboard.html" },
+      { icon: "⚙️", label: "SETTINGS", href: "settings.html" },
+      { icon: "🚪", label: "LOGOUT", href: "#logout" },
+    ];
+
+    function buildMenu(isAdmin) {
+      const list = document.getElementById("menuList");
+      list.innerHTML = "";
+
+      MENU_ITEMS.forEach((item) => {
+        const div = document.createElement(item.href ? "a" : "div");
+        div.className = "menu-item" + (item.href ? "" : " disabled");
+        if (item.href) div.href = item.href;
+        div.innerHTML = `<span class="icon">${item.icon}</span> ${item.label}` +
+          (!item.href ? `<span class="soon">Coming soon</span>` : "");
+        if (item.href === "#logout") {
+          div.addEventListener("click", (e) => {
+            e.preventDefault();
+            logoutHandler();
+          });
+        }
+        list.appendChild(div);
+      });
+
+      if (isAdmin) {
+        const adminEl = document.createElement("a");
+        adminEl.href = "admin.html";
+        adminEl.className = "menu-item admin";
+        adminEl.innerHTML = `<span class="icon">🛠️</span> ADMIN DASHBOARD`;
+        list.appendChild(adminEl);
+      }
+    }
+
+    async function logoutHandler() {
+      await window.supabaseClient.auth.signOut();
+      window.location.reload();
+    }
+
+    (async () => {
+      const user = await getCurrentUser();
+      if (!user) {
+        document.getElementById("loggedOutView").classList.remove("hidden");
+        return;
+      }
+
+      const { data: profile } = await window.supabaseClient
+        .from("profiles").select("role").eq("id", user.id).single();
+
+      buildMenu(profile && profile.role === "admin");
+      document.getElementById("menuView").classList.remove("hidden");
+    })();
+  </script>
+</body>
+</html>

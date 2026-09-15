@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+  />
+
+  <title>Login — BOMB ARENA</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+
+<body>
+
+  <div class="page">
+
+    <div class="brand">
+      <span class="bomb-emoji">💣</span> BOMB ARENA
+    </div>
+
+
+    <!-- LOGIN CARD -->
+    <div class="card" id="loginCard">
+
+      <h2>Log In</h2>
+
+      <form id="loginForm">
+
+        <label for="email">Email</label>
+
+        <input
+          type="email"
+          id="email"
+          required
+          autocomplete="email"
+        />
+
+
+        <label for="password">Password</label>
+
+        <input
+          type="password"
+          id="password"
+          required
+          autocomplete="current-password"
+        />
+
+
+        <button
+          type="submit"
+          id="loginBtn"
+        >
+          LOG IN
+        </button>
+
+      </form>
+
+
+      <div id="msg" class="msg"></div>
+
+
+      <div class="link-row">
+        <a href="#" id="forgotLink">
+          Forgot password?
+        </a>
+      </div>
+
+
+      <div class="link-row">
+        Don't have an account?
+        <a href="register.html">Register</a>
+      </div>
+
+    </div>
+
+
+    <!-- FORGOT PASSWORD CARD -->
+    <div class="card hidden" id="forgotCard">
+
+      <h2>Reset Password</h2>
+
+      <p
+        style="
+          color:var(--color-text-dim);
+          font-size:14px;
+        "
+      >
+        Enter your email and we'll send you a reset link.
+      </p>
+
+
+      <label for="forgotEmail">
+        Email
+      </label>
+
+      <input
+        type="email"
+        id="forgotEmail"
+        required
+      />
+
+
+      <button
+        type="button"
+        id="sendResetBtn"
+      >
+        SEND RESET LINK
+      </button>
+
+
+      <div
+        id="forgotMsg"
+        class="msg"
+      ></div>
+
+
+      <div class="link-row">
+        <a href="#" id="backToLoginLink">
+          Back to login
+        </a>
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- SUPABASE -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+
+
+  <script>
+
+    /* =====================================================
+       CHECK IF ALREADY LOGGED IN
+       ===================================================== */
+
+    (async () => {
+
+      try {
+
+        const user = await getCurrentUser();
+
+        if (!user) {
+          return;
+        }
+
+
+        /* Get profile role */
+
+        const {
+          data: profiles,
+          error
+        } = await window.supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .limit(1);
+
+
+        if (error) {
+
+          console.error(
+            "Role check error:",
+            error
+          );
+
+          return;
+        }
+
+
+        if (
+          profiles &&
+          profiles.length > 0 &&
+          profiles[0].role === "admin"
+        ) {
+
+          window.location.href =
+            "admin.html";
+
+        } else {
+
+          window.location.href =
+            "profile.html";
+
+        }
+
+      } catch (error) {
+
+        console.error(
+          "Login page error:",
+          error
+        );
+
+      }
+
+    })();
+
+
+    /* =====================================================
+       LOGIN
+       ===================================================== */
+
+    const loginForm =
+      document.getElementById("loginForm");
+
+    const msg =
+      document.getElementById("msg");
+
+    const loginBtn =
+      document.getElementById("loginBtn");
+
+
+    loginForm.addEventListener(
+      "submit",
+      async (e) => {
+
+        e.preventDefault();
+
+
+        msg.className = "msg";
+        msg.textContent = "";
+
+
+        const email =
+          document
+            .getElementById("email")
+            .value
+            .trim();
+
+
+        const password =
+          document
+            .getElementById("password")
+            .value;
+
+
+        loginBtn.disabled = true;
+
+        loginBtn.textContent =
+          "LOGGING IN...";
+
+
+        try {
+
+          /* Login */
+
+          const user =
+            await loginUser(
+              email,
+              password
+            );
+
+
+          console.log(
+            "Logged in:",
+            user.id
+          );
+
+
+          /* =================================================
+             GET USER ROLE
+             ================================================= */
+
+          const {
+            data: profiles,
+            error: profileError
+          } = await window.supabaseClient
+            .from("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .limit(1);
+
+
+          if (profileError) {
+
+            console.error(
+              "Profile role error:",
+              profileError
+            );
+
+            throw new Error(
+              "Could not check your account role."
+            );
+
+          }
+
+
+          /* =================================================
+             PROFILE DOES NOT EXIST
+             ================================================= */
+
+          if (
+            !profiles ||
+            profiles.length === 0
+          ) {
+
+            throw new Error(
+              "Profile not found. Please make sure your account has a profile."
+            );
+
+          }
+
+
+          const role =
+            profiles[0].role;
+
+
+          console.log(
+            "Account role:",
+            role
+          );
+
+
+          /* =================================================
+             REDIRECT BASED ON ROLE
+             ================================================= */
+
+          if (role === "admin") {
+
+            window.location.href =
+              "admin.html";
+
+          } else {
+
+            window.location.href =
+              "profile.html";
+
+          }
+
+        } catch (err) {
+
+          console.error(
+            "Login error:",
+            err
+          );
+
+
+          msg.className =
+            "msg error";
+
+
+          msg.textContent =
+            err.message ||
+            "Login failed.";
+
+
+          loginBtn.disabled =
+            false;
+
+
+          loginBtn.textContent =
+            "LOG IN";
+
+        }
+
+      }
+    );
+
+
+    /* =====================================================
+       FORGOT PASSWORD
+       ===================================================== */
+
+    const loginCard =
+      document.getElementById("loginCard");
+
+    const forgotCard =
+      document.getElementById("forgotCard");
+
+
+    document
+      .getElementById("forgotLink")
+      .addEventListener(
+        "click",
+        (e) => {
+
+          e.preventDefault();
+
+          loginCard.classList.add(
+            "hidden"
+          );
+
+          forgotCard.classList.remove(
+            "hidden"
+          );
+
+        }
+      );
+
+
+    document
+      .getElementById("backToLoginLink")
+      .addEventListener(
+        "click",
+        (e) => {
+
+          e.preventDefault();
+
+          forgotCard.classList.add(
+            "hidden"
+          );
+
+          loginCard.classList.remove(
+            "hidden"
+          );
+
+        }
+      );
+
+
+    /* =====================================================
+       PASSWORD RESET
+       ===================================================== */
+
+    document
+      .getElementById("sendResetBtn")
+      .addEventListener(
+        "click",
+        async () => {
+
+          const forgotMsg =
+            document.getElementById(
+              "forgotMsg"
+            );
+
+
+          const email =
+            document
+              .getElementById(
+                "forgotEmail"
+              )
+              .value
+              .trim();
+
+
+          if (!email) {
+
+            forgotMsg.className =
+              "msg error";
+
+            forgotMsg.textContent =
+              "Please enter your email.";
+
+            return;
+
+          }
+
+
+          try {
+
+            await sendPasswordReset(
+              email
+            );
+
+
+            forgotMsg.className =
+              "msg success";
+
+
+            forgotMsg.textContent =
+              "If that email exists, a reset link has been sent.";
+
+          } catch (err) {
+
+            forgotMsg.className =
+              "msg error";
+
+
+            forgotMsg.textContent =
+              err.message ||
+              "Could not send reset email.";
+
+          }
+
+        }
+      );
+
+  </script>
+
+</body>
+</html>

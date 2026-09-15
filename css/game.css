@@ -1,0 +1,99 @@
+/* =========================================================
+   BOMB ARENA — game.css
+   Full-screen game view: canvas + HUD + touch controls.
+   ========================================================= */
+
+html, body.game-body {
+  overflow: hidden;
+  height: 100%;
+  touch-action: none; /* stop the page from scrolling/zooming while playing */
+}
+
+#gameContainer {
+  position: fixed;
+  inset: 0;
+  background: #0a0b10;
+}
+
+#gameCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- HUD ---- */
+#hud {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 10px; right: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.hud-pill {
+  background: rgba(20,22,31,0.75);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(4px);
+}
+
+/* ---- Virtual Joystick ---- */
+#joystickZone {
+  position: fixed;
+  left: max(20px, env(safe-area-inset-left));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: 130px; height: 130px;
+  z-index: 30;
+  touch-action: none;
+}
+
+.joy-base {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.18);
+  position: relative;
+  touch-action: none;
+}
+
+.joy-knob {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 54px; height: 54px;
+  margin-left: -27px; margin-top: -27px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transition: transform 0.03s linear;
+  pointer-events: none;
+}
+
+/* ---- Action buttons (bottom-right), wired up next phase ---- */
+#actionZone {
+  position: fixed;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.action-btn {
+  width: 84px; height: 84px;
+  border-radius: 50%;
+  border: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: white;
+  background: var(--color-bg-input);
+  border: 2px solid var(--color-border);
+  opacity: 0.5;
+}

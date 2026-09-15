@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Leaderboard — BOMB ARENA</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/mobile.css" />
+  <style>
+    .lb-row { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--color-border); }
+    .lb-row:last-child { border-bottom:none; }
+    .lb-row.me { background: rgba(255,209,102,0.06); }
+    .rank { width:32px; font-weight:900; font-size:16px; text-align:center; }
+    .lb-name { flex:1; font-weight:700; }
+    .lb-sub { color:var(--color-text-dim); font-size:11px; }
+    .sort-bar { display:flex; gap:8px; margin-bottom:14px; }
+    .sort-bar button { width:auto; flex:1; margin:0; min-height:40px; font-size:12px; background:var(--color-bg-input); border:1px solid var(--color-border); color:var(--color-text-dim); }
+    .sort-bar button.active { background: var(--color-primary); color:#fff; border-color:var(--color-primary); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="brand" style="font-size:22px;">🏆 LEADERBOARD</div>
+
+    <div class="sort-bar">
+      <button data-sort="total_wins" class="active">Wins</button>
+      <button data-sort="total_kills">Kills</button>
+    </div>
+
+    <div class="card" style="padding:0;">
+      <div id="lbList"></div>
+    </div>
+
+    <a href="index.html" class="btn btn-secondary">BACK TO MENU</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    const RANK_ICONS = ["🥇", "🥈", "🥉"];
+    let currentUser = null;
+
+    async function loadLeaderboard(sortBy) {
+      const { data, error } = await window.supabaseClient
+        .from("public_profiles")
+        .select("id, username, avatar_url, total_wins, total_kills, total_deaths")
+        .order(sortBy, { ascending: false })
+        .limit(50);
+
+      const list = document.getElementById("lbList");
+      list.innerHTML = "";
+      if (error || !data || data.length === 0) {
+        list.innerHTML = `<p style="padding:16px;color:var(--color-text-dim);">No players yet.</p>`;
+        return;
+      }
+
+      data.forEach((p, i) => {
+        const row = document.createElement("div");
+        row.className = "lb-row" + (p.id === currentUser.id ? " me" : "");
+        row.innerHTML = `
+          <div class="rank">${RANK_ICONS[i] || (i + 1) + "."}</div>
+          <div>
+            <div class="lb-name">${p.username}${p.id === currentUser.id ? " (you)" : ""}</div>
+            <div class="lb-sub">Wins: ${p.total_wins} · Kills: ${p.total_kills} · Deaths: ${p.total_deaths}</div>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    (async () => {
+      currentUser = await requireAuth();
+      if (!currentUser) return;
+      await loadLeaderboard("total_wins");
+
+      document.querySelectorAll(".sort-bar button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".sort-bar button").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          loadLeaderboard(btn.dataset.sort);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

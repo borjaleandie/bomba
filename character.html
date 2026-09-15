@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Customize Character — BOMB ARENA</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/mobile.css" />
+  <style>
+    .swatch-row { display:flex; gap:10px; align-items:center; }
+    .swatch-row input[type="color"] {
+      width: 44px; height: 44px; padding: 0; border: none; border-radius: 10px; background: none; flex-shrink:0;
+    }
+    .style-select { flex: 1; }
+    #previewWrap {
+      display:flex; justify-content:center; align-items:center;
+      background: radial-gradient(circle at 50% 30%, #2a2f47, #14161f);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    #previewWrap svg { width: 160px; height: 220px; }
+    .part-label { font-weight: 700; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="brand" style="font-size:22px;">🎨 CUSTOMIZE CHARACTER</div>
+
+    <div id="previewWrap">
+      <div id="preview"></div>
+    </div>
+    <div style="text-align:center; font-weight:700; margin-top:8px;" id="previewName">PLAYER</div>
+
+    <div class="card">
+      <div class="part-label">Body</div>
+      <div class="swatch-row">
+        <select id="body" class="style-select"></select>
+        <input type="color" id="body_color" value="#f1c27d" />
+      </div>
+
+      <div class="part-label">Hair</div>
+      <div class="swatch-row">
+        <select id="hair" class="style-select"></select>
+        <input type="color" id="hair_color" value="#2b1b0e" />
+      </div>
+
+      <div class="part-label">Shirt</div>
+      <div class="swatch-row">
+        <select id="shirt" class="style-select"></select>
+        <input type="color" id="shirt_color" value="#3498db" />
+      </div>
+
+      <div class="part-label">Pants</div>
+      <div class="swatch-row">
+        <select id="pants" class="style-select"></select>
+        <input type="color" id="pants_color" value="#2c3e50" />
+      </div>
+
+      <div class="part-label">Shoes</div>
+      <div class="swatch-row">
+        <select id="shoes" class="style-select"></select>
+        <input type="color" id="shoes_color" value="#111111" />
+      </div>
+
+      <div class="part-label">Accessory</div>
+      <select id="accessory"></select>
+    </div>
+
+    <button id="saveBtn">SAVE CHARACTER</button>
+    <a href="profile.html" class="btn btn-secondary">BACK TO PROFILE</a>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/character.js"></script>
+  <script>
+    let currentUser = null;
+    let character = null;
+
+    const fields = ["body", "hair", "shirt", "pants", "shoes", "accessory"];
+    const colorFields = ["body_color", "hair_color", "shirt_color", "pants_color", "shoes_color"];
+
+    function populateSelects() {
+      fields.forEach((field) => {
+        const select = document.getElementById(field);
+        CHARACTER_OPTIONS[field].forEach((opt) => {
+          const el = document.createElement("option");
+          el.value = opt;
+          el.textContent = opt.replace(/_/g, " ").toUpperCase();
+          select.appendChild(el);
+        });
+      });
+    }
+
+    function renderPreview() {
+      document.getElementById("preview").innerHTML = renderCharacterSVG(character);
+    }
+
+    function bindInputs() {
+      [...fields, ...colorFields].forEach((field) => {
+        document.getElementById(field).addEventListener("input", (e) => {
+          character[field] = e.target.value;
+          renderPreview();
+        });
+      });
+    }
+
+    (async () => {
+      currentUser = await requireAuth();
+      if (!currentUser) return;
+
+      populateSelects();
+
+      try {
+        character = await loadCharacter(currentUser.id);
+      } catch (err) {
+        console.error(err);
+        return;
+      }
+
+      // Reflect loaded values into the form
+      [...fields, ...colorFields].forEach((field) => {
+        const el = document.getElementById(field);
+        if (character[field]) el.value = character[field];
+      });
+
+      const { data: profileData } = await window.supabaseClient
+        .from("profiles").select("username").eq("id", currentUser.id).single();
+      if (profileData) document.getElementById("previewName").textContent = profileData.username.toUpperCase();
+
+      bindInputs();
+      renderPreview();
+    })();
+
+    document.getElementById("saveBtn").addEventListener("click", async () => {
+      const msg = document.getElementById("msg");
+      msg.className = "msg";
+      try {
+        await saveCharacter(currentUser.id, character);
+        msg.className = "msg success";
+        msg.textContent = "Character saved!";
+      } catch (err) {
+        msg.className = "msg error";
+        msg.textContent = err.message || "Could not save character.";
+      }
+    });
+  </script>
+</body>
+</html>

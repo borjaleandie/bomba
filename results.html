@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Results — BOMB ARENA</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    .winner-card { text-align:center; }
+    .winner-crown { font-size: 40px; }
+    .winner-name { font-size: 24px; font-weight: 900; margin: 6px 0; }
+    .winner-stats { color: var(--color-text-dim); font-size: 14px; }
+
+    .leaderboard-row {
+      display:flex; align-items:center; gap:12px;
+      padding: 12px 14px; border-bottom: 1px solid var(--color-border);
+    }
+    .leaderboard-row:last-child { border-bottom: none; }
+    .rank { font-weight:900; width: 30px; font-size:16px; }
+    .lb-name { flex:1; font-weight:700; }
+    .lb-score { font-weight:900; color: var(--color-accent); }
+    .lb-sub { color: var(--color-text-dim); font-size:11px; }
+    .you-row { background: rgba(255,209,102,0.06); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div id="loadingState" style="text-align:center;padding-top:60px;color:var(--color-text-dim);">Loading results...</div>
+
+    <div id="resultsContent" class="hidden">
+      <div class="brand" style="font-size:22px;">🏆 ROUND COMPLETE</div>
+
+      <div class="card winner-card">
+        <div class="winner-crown">👑</div>
+        <div style="color:var(--color-text-dim);font-size:12px;letter-spacing:2px;">WINNER</div>
+        <div class="winner-name" id="winnerName">-</div>
+        <div class="winner-stats" id="winnerStats"></div>
+      </div>
+
+      <div class="card" style="padding:0;">
+        <div id="leaderboardList"></div>
+      </div>
+
+      <h3 style="margin-top:22px;">💬 Chat</h3>
+      <div class="chat-panel" id="chatPanel"></div>
+
+      <a href="index.html" class="btn">BACK TO MAIN MENU</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/sound.js"></script>
+  <script>
+    const RANK_ICONS = ["🥇", "🥈", "🥉"];
+
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+
+      const params = new URLSearchParams(window.location.search);
+      const roundId = params.get("round");
+      if (!roundId) { window.location.href = "index.html"; return; }
+
+      const { data: result, error } = await window.supabaseClient
+        .from("game_results")
+        .select("room_id, winner_id, leaderboard")
+        .eq("round_id", roundId)
+        .maybeSingle();
+
+      if (error || !result) {
+        document.getElementById("loadingState").textContent = "Results not ready yet — please wait a moment and refresh.";
+        return;
+      }
+
+      renderResults(result.leaderboard);
+      await applyMyStatsOnce(roundId, result.leaderboard, user.id);
+      if (result.leaderboard[0] && result.leaderboard[0].user_id === user.id) playSound("victory");
+
+      mountChatPanel(document.getElementById("chatPanel"), {
+        roomId: result.room_id, userId: user.id, username: (await window.supabaseClient.from("profiles").select("username").eq("id", user.id).single()).data.username,
+      });
+
+      document.getElementById("loadingState").classList.add("hidden");
+      document.getElementById("resultsContent").classList.remove("hidden");
+    }
+
+    function renderResults(leaderboard) {
+      const winner = leaderboard[0];
+      if (winner) {
+        document.getElementById("winnerName").textContent = winner.username;
+        document.getElementById("winnerStats").textContent =
+          `KILLS: ${winner.kills}  ·  DEATHS: ${winner.deaths}  ·  SCORE: ${winner.score}`;
+      }
+
+      const list = document.getElementById("leaderboardList");
+      list.innerHTML = "";
+      leaderboard.forEach((row, i) => {
+        const div = document.createElement("div");
+        div.className = "leaderboard-row";
+        div.innerHTML = `
+          <div class="rank">${RANK_ICONS[i] || (i + 1) + "."}</div>
+          <div>
+            <div class="lb-name">${row.username}</div>
+            <div class="lb-sub">Kills: ${row.kills} · Deaths: ${row.deaths}</div>
+          </div>
+          <div class="lb-score">${row.score}</div>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    /**
+     * Apply this round's kills/deaths (and a win, if applicable) to
+     * the current user's lifetime profile stats — exactly once,
+     * even if this page is refreshed.
+     */
+    async function applyMyStatsOnce(roundId, leaderboard, userId) {
+      const flagKey = "stats_applied_" + roundId;
+      if (sessionStorage.getItem(flagKey)) return;
+
+      const mine = leaderboard.find((r) => r.user_id === userId);
+      if (!mine) return;
+
+      const won = leaderboard[0] && leaderboard[0].user_id === userId;
+
+      const { error } = await window.supabaseClient.rpc("increment_profile_stats", {
+        p_kills: mine.kills,
+        p_deaths: mine.deaths,
+        p_won: won,
+      });
+
+      if (!error) sessionStorage.setItem(flagKey, "1");
+    }
+
+    init();
+  </script>
+</body>
+</html>

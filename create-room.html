@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <title>Create Room — BOMB ARENA</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="brand" style="font-size:22px;">🕹️ CREATE ROOM</div>
+
+    <div class="card">
+      <form id="createForm">
+        <label for="roomName">Room Name</label>
+        <input type="text" id="roomName" placeholder="My Friends" required maxlength="40" />
+
+        <label for="playerLimit">Player Limit</label>
+        <select id="playerLimit">
+          <option value="2">2 Players</option>
+          <option value="3">3 Players</option>
+          <option value="4">4 Players</option>
+          <option value="5">5 Players</option>
+          <option value="6">6 Players</option>
+          <option value="7">7 Players</option>
+          <option value="8" selected>8 Players</option>
+          <option value="9">9 Players</option>
+          <option value="10">10 Players</option>
+        </select>
+
+        <label for="map">Map</label>
+        <select id="map">
+          <option value="arena1">Arena 1</option>
+          <option value="arena2">Arena 2</option>
+          <option value="arena3">Arena 3</option>
+        </select>
+
+        <label for="roundDuration">Round Duration</label>
+        <select id="roundDuration">
+          <option value="180">3 minutes</option>
+          <option value="300" selected>5 minutes</option>
+          <option value="600">10 minutes</option>
+        </select>
+
+        <button type="submit" id="createBtn">CREATE ROOM</button>
+      </form>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <a href="index.html" class="btn btn-secondary">BACK TO MENU</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/room.js"></script>
+  <script>
+    let currentUser = null;
+    (async () => { currentUser = await requireAuth(); })();
+
+    document.getElementById("createForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+
+      const msg = document.getElementById("msg");
+      const btn = document.getElementById("createBtn");
+      msg.className = "msg";
+      btn.disabled = true;
+      btn.textContent = "CREATING...";
+
+      try {
+        const room = await createRoom({
+          roomName: document.getElementById("roomName").value,
+          playerLimit: parseInt(document.getElementById("playerLimit").value, 10),
+          map: document.getElementById("map").value,
+          roundDurationSeconds: parseInt(document.getElementById("roundDuration").value, 10),
+          hostId: currentUser.id,
+        });
+        window.location.href = "lobby.html?code=" + room.room_code;
+      } catch (err) {
+        msg.className = "msg error";
+        msg.textContent = err.message || "Could not create room.";
+        btn.disabled = false;
+        btn.textContent = "CREATE ROOM";
+      }
+    });
+  </script>
+</body>
+</html>
