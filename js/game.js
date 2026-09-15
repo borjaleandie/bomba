@@ -1378,6 +1378,12 @@ function hostHandlePickupRequest({
 // =========================================================
 // HOST THROW
 // =========================================================
+// LONG DISTANCE THROW FIX
+//
+// Bomb can travel up to 500 pixels.
+// If an obstacle is closer, the bomb stops safely
+// before the obstacle.
+// =========================================================
 
 function hostHandleThrowRequest({
   bombId,
@@ -1390,6 +1396,7 @@ function hostHandleThrowRequest({
   const bomb =
     bombs[bombId];
 
+
   if (
     !bomb ||
     bomb.state !==
@@ -1401,7 +1408,24 @@ function hostHandleThrowRequest({
   }
 
 
-  const target =
+  // -------------------------------------------------------
+  // THROW SETTINGS
+  // -------------------------------------------------------
+
+  const MAX_THROW_DISTANCE =
+    500;
+
+  const MIN_THROW_DISTANCE =
+    40;
+
+
+  // -------------------------------------------------------
+  // Get the normal collision target first.
+  //
+  // This keeps the existing collision.js behavior.
+  // -------------------------------------------------------
+
+  let collisionTarget =
     computeThrowTarget(
       fromX,
       fromY,
@@ -1410,12 +1434,349 @@ function hostHandleThrowRequest({
     );
 
 
-  const travelMs =
-    (
-      target.distance /
-      THROW_SPEED_PX_PER_SEC
-    ) * 1000;
+  if (
+    !collisionTarget ||
+    !Number.isFinite(
+      collisionTarget.x
+    ) ||
+    !Number.isFinite(
+      collisionTarget.y
+    )
+  ) {
 
+    collisionTarget = {
+
+      x:
+        fromX,
+
+      y:
+        fromY,
+
+      distance:
+        0
+
+    };
+
+  }
+
+
+  // -------------------------------------------------------
+  // Determine direction
+  // -------------------------------------------------------
+
+  let directionX = 0;
+  let directionY = 0;
+
+
+  // -------------------------------------------------------
+  // Facing as a string
+  // -------------------------------------------------------
+
+  if (
+    typeof facing ===
+    "string"
+  ) {
+
+    const direction =
+      facing.toLowerCase();
+
+
+    if (
+      direction ===
+        "left"
+    ) {
+
+      directionX =
+        -1;
+
+      directionY =
+        0;
+
+    }
+    else if (
+      direction ===
+        "right"
+    ) {
+
+      directionX =
+        1;
+
+      directionY =
+        0;
+
+    }
+    else if (
+      direction ===
+        "up"
+    ) {
+
+      directionX =
+        0;
+
+      directionY =
+        -1;
+
+    }
+    else if (
+      direction ===
+        "down"
+    ) {
+
+      directionX =
+        0;
+
+      directionY =
+        1;
+
+    }
+
+  }
+
+
+  // -------------------------------------------------------
+  // Facing as an object
+  // Example:
+  // { x: 1, y: 0 }
+  // -------------------------------------------------------
+
+  if (
+    typeof facing ===
+      "object" &&
+    facing !== null
+  ) {
+
+    const fx =
+      Number(
+        facing.x
+      );
+
+    const fy =
+      Number(
+        facing.y
+      );
+
+
+    if (
+      Number.isFinite(fx) &&
+      Number.isFinite(fy) &&
+      (
+        fx !== 0 ||
+        fy !== 0
+      )
+    ) {
+
+      directionX =
+        fx;
+
+      directionY =
+        fy;
+
+    }
+
+  }
+
+
+  // -------------------------------------------------------
+  // If facing wasn't recognized, use the direction
+  // from the collision target.
+  // -------------------------------------------------------
+
+  if (
+    directionX === 0 &&
+    directionY === 0
+  ) {
+
+    const dx =
+      collisionTarget.x -
+      fromX;
+
+    const dy =
+      collisionTarget.y -
+      fromY;
+
+
+    const collisionDistance =
+      Math.hypot(
+        dx,
+        dy
+      );
+
+
+    if (
+      collisionDistance >
+      0
+    ) {
+
+      directionX =
+        dx /
+        collisionDistance;
+
+      directionY =
+        dy /
+        collisionDistance;
+
+    }
+
+  }
+
+
+  // -------------------------------------------------------
+  // Calculate target
+  // -------------------------------------------------------
+
+  let targetX =
+    fromX;
+
+  let targetY =
+    fromY;
+
+
+  const directionLength =
+    Math.hypot(
+      directionX,
+      directionY
+    );
+
+
+  if (
+    directionLength >
+    0
+  ) {
+
+    directionX /=
+      directionLength;
+
+    directionY /=
+      directionLength;
+
+
+    // -----------------------------------------------------
+    // Default target = maximum throw distance
+    // -----------------------------------------------------
+
+    targetX =
+      fromX +
+      directionX *
+      MAX_THROW_DISTANCE;
+
+    targetY =
+      fromY +
+      directionY *
+      MAX_THROW_DISTANCE;
+
+
+    // -----------------------------------------------------
+    // If an obstacle is closer than the maximum distance,
+    // stop before the obstacle.
+    // -----------------------------------------------------
+
+    if (
+      Number.isFinite(
+        collisionTarget.distance
+      ) &&
+      collisionTarget.distance >
+        0 &&
+      collisionTarget.distance <
+        MAX_THROW_DISTANCE
+    ) {
+
+      const safeDistance =
+        Math.max(
+          MIN_THROW_DISTANCE,
+          collisionTarget.distance -
+            10
+        );
+
+
+      targetX =
+        fromX +
+        directionX *
+        safeDistance;
+
+      targetY =
+        fromY +
+        directionY *
+        safeDistance;
+
+    }
+
+  }
+  else {
+
+    // -----------------------------------------------------
+    // Fallback to existing collision target
+    // -----------------------------------------------------
+
+    targetX =
+      collisionTarget.x;
+
+    targetY =
+      collisionTarget.y;
+
+  }
+
+
+  // -------------------------------------------------------
+  // Keep target inside the game world.
+  // -------------------------------------------------------
+
+  if (
+    typeof WORLD_SIZE ===
+    "number"
+  ) {
+
+    targetX =
+      Math.max(
+        0,
+        Math.min(
+          WORLD_SIZE,
+          targetX
+        )
+      );
+
+    targetY =
+      Math.max(
+        0,
+        Math.min(
+          WORLD_SIZE,
+          targetY
+        )
+      );
+
+  }
+
+
+  // -------------------------------------------------------
+  // Calculate actual throw distance
+  // -------------------------------------------------------
+
+  const throwDistance =
+    Math.hypot(
+      targetX -
+        fromX,
+
+      targetY -
+        fromY
+    );
+
+
+  // -------------------------------------------------------
+  // Calculate travel time.
+  // -------------------------------------------------------
+
+  const travelMs =
+    Math.max(
+      100,
+      (
+        throwDistance /
+        THROW_SPEED_PX_PER_SEC
+      ) * 1000
+    );
+
+
+  // -------------------------------------------------------
+  // Bomb state
+  // -------------------------------------------------------
 
   const changes = {
 
@@ -1432,18 +1793,23 @@ function hostHandleThrowRequest({
       fromY,
 
     targetX:
-      target.x,
+      targetX,
 
     targetY:
-      target.y,
+      targetY,
 
     startTime:
       performance.now(),
 
-    travelMs
+    travelMs:
+      travelMs
 
   };
 
+
+  // -------------------------------------------------------
+  // Apply locally
+  // -------------------------------------------------------
 
   applyBombState({
 
@@ -1453,6 +1819,10 @@ function hostHandleThrowRequest({
 
   });
 
+
+  // -------------------------------------------------------
+  // Broadcast to all players
+  // -------------------------------------------------------
 
   gameChannel.send({
 
@@ -1473,6 +1843,10 @@ function hostHandleThrowRequest({
   });
 
 
+  // -------------------------------------------------------
+  // Remove carried bomb from local player
+  // -------------------------------------------------------
+
   if (
     userId ===
     currentUser.id
@@ -1483,6 +1857,55 @@ function hostHandleThrowRequest({
 
   }
 
+
+  // -------------------------------------------------------
+  // Debug
+  // -------------------------------------------------------
+
+  console.log(
+    "================================="
+  );
+
+  console.log(
+    "BOMB THROW"
+  );
+
+  console.log(
+    "Start:",
+    fromX,
+    fromY
+  );
+
+  console.log(
+    "Target:",
+    targetX,
+    targetY
+  );
+
+  console.log(
+    "Distance:",
+    Math.round(
+      throwDistance
+    ),
+    "px"
+  );
+
+  console.log(
+    "Travel time:",
+    Math.round(
+      travelMs
+    ),
+    "ms"
+  );
+
+  console.log(
+    "================================="
+  );
+
+
+  // -------------------------------------------------------
+  // Resolve explosion after travel
+  // -------------------------------------------------------
 
   setTimeout(
     () =>

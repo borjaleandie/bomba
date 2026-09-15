@@ -168,3 +168,233 @@ function findSafeBombSpawn(mapKey, playerPositions, minDistanceFromPlayers = 70)
   const zone = arena.bombSpawnZones[0];
   return { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 };
 }
+/**
+ * Calculate how far a bomb can travel in the direction
+ * the player is facing.
+ *
+ * The bomb can travel up to maxDistance, but stops before
+ * hitting an obstacle.
+ */
+function computeThrowTarget(
+  fromX,
+  fromY,
+  facing,
+  obstacles,
+  maxDistance = 500
+) {
+
+  let directionX = 0;
+  let directionY = 0;
+
+
+  // -------------------------------------------------------
+  // Facing stored as a string
+  // -------------------------------------------------------
+
+  if (
+    typeof facing === "string"
+  ) {
+
+    const direction =
+      facing.toLowerCase();
+
+
+    if (
+      direction === "left"
+    ) {
+
+      directionX = -1;
+      directionY = 0;
+
+    }
+    else if (
+      direction === "right"
+    ) {
+
+      directionX = 1;
+      directionY = 0;
+
+    }
+    else if (
+      direction === "up"
+    ) {
+
+      directionX = 0;
+      directionY = -1;
+
+    }
+    else if (
+      direction === "down"
+    ) {
+
+      directionX = 0;
+      directionY = 1;
+
+    }
+
+  }
+
+
+  // -------------------------------------------------------
+  // Facing stored as an object
+  // -------------------------------------------------------
+
+  if (
+    typeof facing === "object" &&
+    facing !== null
+  ) {
+
+    directionX =
+      Number(facing.x) || 0;
+
+    directionY =
+      Number(facing.y) || 0;
+
+  }
+
+
+  // -------------------------------------------------------
+  // No valid direction
+  // -------------------------------------------------------
+
+  if (
+    directionX === 0 &&
+    directionY === 0
+  ) {
+
+    return {
+      x: fromX,
+      y: fromY,
+      distance: 0
+    };
+
+  }
+
+
+  // -------------------------------------------------------
+  // Normalize direction
+  // -------------------------------------------------------
+
+  const length =
+    Math.hypot(
+      directionX,
+      directionY
+    );
+
+
+  directionX /=
+    length;
+
+  directionY /=
+    length;
+
+
+  // -------------------------------------------------------
+  // Step through the throw path.
+  //
+  // Smaller steps make sure the bomb does not pass
+  // through a wall or obstacle.
+  // -------------------------------------------------------
+
+  const STEP = 5;
+
+  let lastSafeX =
+    fromX;
+
+  let lastSafeY =
+    fromY;
+
+  let travelled =
+    0;
+
+
+  while (
+    travelled <
+    maxDistance
+  ) {
+
+    travelled =
+      Math.min(
+        travelled + STEP,
+        maxDistance
+      );
+
+
+    const testX =
+      fromX +
+      directionX *
+      travelled;
+
+
+    const testY =
+      fromY +
+      directionY *
+      travelled;
+
+
+    // -----------------------------------------------------
+    // Keep bomb inside arena
+    // -----------------------------------------------------
+
+    if (
+      testX < 14 ||
+      testX >
+        WORLD_SIZE - 14 ||
+      testY < 14 ||
+      testY >
+        WORLD_SIZE - 14
+    ) {
+
+      break;
+
+    }
+
+
+    // -----------------------------------------------------
+    // Check obstacle collision
+    //
+    // Bomb radius = 10
+    // -----------------------------------------------------
+
+    if (
+      collidesWithAnyObstacle(
+        testX,
+        testY,
+        10,
+        obstacles
+      )
+    ) {
+
+      break;
+
+    }
+
+
+    lastSafeX =
+      testX;
+
+    lastSafeY =
+      testY;
+
+  }
+
+
+  return {
+
+    x:
+      lastSafeX,
+
+    y:
+      lastSafeY,
+
+    distance:
+      Math.hypot(
+        lastSafeX -
+          fromX,
+
+        lastSafeY -
+          fromY
+      )
+
+  };
+}
