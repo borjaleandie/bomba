@@ -14,6 +14,7 @@
  *   - Host creates the round.
  *   - Round ID is ALWAYS saved to game_rooms.current_round_id.
  *   - Room becomes "playing" only after the round exists.
+ *   - Broken "playing + no round" rooms are automatically repaired.
  * ---------------------------------------------------------
  */
 
@@ -44,6 +45,7 @@ async function getLobbyUser() {
 
   if (error) {
     console.error("Auth error:", error);
+
     throw new Error(
       "Could not verify your login session."
     );
@@ -349,15 +351,6 @@ async function leaveRoom(
 // =========================================================
 // CREATE GAME ROUND
 // =========================================================
-// This function is now responsible for:
-//
-// 1. Creating game_rounds
-// 2. Saving current_round_id
-// 3. Making sure the round is playing
-//
-// It DOES NOT depend on another function to attach
-// the round afterward.
-// =========================================================
 
 async function createGameRound(
   roomId,
@@ -592,7 +585,6 @@ async function createGameRound(
   //
   // Attach round to room.
   // Also change room to PLAYING.
-  //
   // -------------------------------------------------------
 
   const {
@@ -734,10 +726,6 @@ async function createGameRound(
 // =========================================================
 // BEGIN START SEQUENCE
 // =========================================================
-// Kept for compatibility with other code.
-//
-// The actual host start is handled by startGame().
-// =========================================================
 
 async function beginStartSequence(
   roomId
@@ -777,9 +765,22 @@ async function beginStartSequence(
     room.status === "playing"
   ) {
 
+    // FIX:
+    // If an old/broken room is "playing" without a round,
+    // repair it automatically.
+
     if (
       !room.current_round_id
     ) {
+
+      console.warn(
+        "Broken playing room detected. Resetting and creating a new round."
+      );
+
+      await resetBrokenRoom(
+        roomId,
+        user.id
+      );
 
       await createGameRound(
         roomId,
@@ -911,8 +912,6 @@ async function beginStartSequence(
 
   // -------------------------------------------------------
   // Create and attach round.
-  //
-  // createGameRound() also changes the room to PLAYING.
   // -------------------------------------------------------
 
   await createGameRound(
@@ -924,6 +923,89 @@ async function beginStartSequence(
   return await getLobbyRoom(
     roomId
   );
+}
+
+
+// =========================================================
+// RESET BROKEN ROOM
+// =========================================================
+// FIX FOR:
+// "This room has no active round."
+//
+// If a room is accidentally:
+//     status = playing
+//     current_round_id = null
+//
+// this function changes it back to waiting so that
+// createGameRound() can safely create a new round.
+// =========================================================
+
+async function resetBrokenRoom(
+  roomId,
+  hostId
+) {
+
+  if (!roomId) {
+    throw new Error(
+      "Room ID is required."
+    );
+  }
+
+  if (!hostId) {
+    throw new Error(
+      "Host ID is required."
+    );
+  }
+
+  const {
+    data,
+    error
+  } = await window.supabaseClient
+    .from("game_rooms")
+    .update({
+      status: "waiting",
+      current_round_id: null,
+      started_at: null,
+      ended_at: null
+    })
+    .eq(
+      "id",
+      roomId
+    )
+    .eq(
+      "host_id",
+      hostId
+    )
+    .select()
+    .limit(1);
+
+  if (error) {
+
+    console.error(
+      "Reset broken room error:",
+      error
+    );
+
+    throw error;
+  }
+
+  if (
+    !data ||
+    data.length === 0
+  ) {
+
+    throw new Error(
+      "Could not reset the broken room."
+    );
+
+  }
+
+  console.log(
+    "Broken room successfully reset:",
+    roomId
+  );
+
+  return data[0];
 }
 
 
@@ -957,6 +1039,37 @@ async function markRoomPlaying(
       "Only the host can start the game."
     );
 
+  }
+
+
+  // -------------------------------------------------------
+  // FIX:
+  // If the room is broken, repair it instead of showing
+  // "This room has no active round."
+  // -------------------------------------------------------
+
+  if (
+    room.status === "playing" &&
+    !room.current_round_id
+  ) {
+
+    console.warn(
+      "markRoomPlaying detected broken room. Repairing..."
+    );
+
+    await resetBrokenRoom(
+      roomId,
+      user.id
+    );
+
+    await createGameRound(
+      roomId,
+      user.id
+    );
+
+    return await getLobbyRoom(
+      roomId
+    );
   }
 
 
@@ -1069,7 +1182,7 @@ async function startGame(
   }
 
 
-  const room =
+  let room =
     await getLobbyRoom(
       roomId
     );
@@ -1091,7 +1204,9 @@ async function startGame(
 
 
   // -------------------------------------------------------
-  // If already playing, don't create another round.
+  // FIX:
+  // If an old room is already "playing" but has no round,
+  // repair it automatically.
   // -------------------------------------------------------
 
   if (
@@ -1102,13 +1217,46 @@ async function startGame(
       !room.current_round_id
     ) {
 
-      throw new Error(
-        "Room is already marked as playing but has no active round."
+      console.warn(
+        "Broken playing room detected."
       );
 
+      console.warn(
+        "Repairing room and creating missing round..."
+      );
+
+      // Reset broken room.
+      await resetBrokenRoom(
+        roomId,
+        user.id
+      );
+
+      // Reload room after reset.
+      room =
+        await getLobbyRoom(
+          roomId
+        );
+
+      // Create new round.
+      await createGameRound(
+        roomId,
+        user.id
+      );
+
+      // Load final room.
+      const repairedRoom =
+        await getLobbyRoom(
+          roomId
+        );
+
+      // Verify final state.
+      return await verifyActiveRound(
+        repairedRoom
+      );
     }
 
 
+    // Normal playing room.
     return await verifyActiveRound(
       room
     );
