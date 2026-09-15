@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+  />
+
   <title>Lobby — BOMB ARENA</title>
+
   <link rel="stylesheet" href="css/style.css" />
 
   <style>
@@ -203,6 +208,9 @@
     </div>
   </div>
 
+
+  <!-- COUNTDOWN -->
+
   <div id="countdownOverlay" class="hidden">
 
     <div id="countdownNumber">
@@ -215,7 +223,9 @@
 
   </div>
 
+
   <!-- Supabase -->
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
   <script src="js/supabase.js"></script>
@@ -225,85 +235,112 @@
   <script src="js/realtime.js"></script>
   <script src="js/lobby.js"></script>
 
+
   <script>
+
+    // =====================================================
+    // VARIABLES
+    // =====================================================
 
     let currentUser = null;
     let currentProfile = null;
+
     let room = null;
     let channel = null;
     let players = [];
+
     let myIsReady = false;
 
+    let countdownStarted = false;
+    let gameRedirected = false;
+    let countdownInterval = null;
+
+
     const params =
-      new URLSearchParams(window.location.search);
+      new URLSearchParams(
+        window.location.search
+      );
+
 
     const roomCodeFromUrl =
-      (params.get("code") || "").toUpperCase();
+      (
+        params.get("code") ||
+        ""
+      ).toUpperCase();
 
+
+    // =====================================================
+    // MAP LABEL
+    // =====================================================
 
     function mapLabel(m) {
 
       return {
+
         arena1: "Arena 1",
         arena2: "Arena 2",
         arena3: "Arena 3"
+
       }[m] || m;
 
     }
 
 
+    // =====================================================
+    // DURATION LABEL
+    // =====================================================
+
     function durationLabel(s) {
 
-      return Math.round(s / 60) + " min";
+      return Math.round(
+        s / 60
+      ) + " min";
 
     }
 
+
+    // =====================================================
+    // INIT
+    // =====================================================
 
     async function init() {
 
       try {
 
-        /*
-         * Get logged-in user
-         */
         currentUser =
           await requireAuth();
+
 
         if (!currentUser) {
           return;
         }
 
 
-        /*
-         * Load current user's profile.
-         *
-         * IMPORTANT:
-         * avatar_url was removed because
-         * profiles table does not have
-         * an avatar_url column.
-         */
+        // -------------------------------------------------
+        // Load profile
+        // -------------------------------------------------
+
         const {
           data: profile,
           error: profileError
-        } = await window.supabaseClient
-          .from("profiles")
-          .select(
-            "id, username, full_name, email"
-          )
-          .eq("id", currentUser.id)
-          .maybeSingle();
+        } =
+          await window.supabaseClient
+            .from("profiles")
+            .select(
+              "id, username, full_name, email"
+            )
+            .eq(
+              "id",
+              currentUser.id
+            )
+            .limit(1);
 
 
         if (profileError) {
 
           console.error(
             "Profile loading error:",
-            {
-              message: profileError.message,
-              details: profileError.details,
-              hint: profileError.hint,
-              code: profileError.code
-            }
+            profileError
           );
 
           showError(
@@ -312,34 +349,31 @@
           );
 
           return;
+
         }
 
 
-        /*
-         * Profile does not exist
-         */
-        if (!profile) {
-
-          console.error(
-            "No profile found for user:",
-            currentUser.id
-          );
+        if (
+          !profile ||
+          profile.length === 0
+        ) {
 
           showError(
             "Your player profile was not found. Please log out and log in again."
           );
 
           return;
+
         }
 
 
-        currentProfile = profile;
+        currentProfile =
+          profile[0];
 
 
-        /*
-         * Make sure username exists
-         */
-        if (!currentProfile.username) {
+        if (
+          !currentProfile.username
+        ) {
 
           currentProfile.username =
             currentProfile.full_name ||
@@ -348,9 +382,10 @@
         }
 
 
-        /*
-         * Check room code
-         */
+        // -------------------------------------------------
+        // Check room code
+        // -------------------------------------------------
+
         if (!roomCodeFromUrl) {
 
           showError(
@@ -358,54 +393,51 @@
           );
 
           return;
+
         }
 
 
-        /*
-         * Load room
-         */
-        try {
+        // -------------------------------------------------
+        // Load room
+        // -------------------------------------------------
 
-          room =
-            await getRoomByCode(
-              roomCodeFromUrl
-            );
-
-          if (!room) {
-
-            showError(
-              "ROOM NOT FOUND"
-            );
-
-            return;
-          }
-
-        } catch (err) {
-
-          console.error(
-            "Room loading error:",
-            err
+        room =
+          await getRoomByCode(
+            roomCodeFromUrl
           );
 
+
+        if (!room) {
+
           showError(
-            err.message ||
-            "Could not load room."
+            "ROOM NOT FOUND"
           );
 
           return;
+
         }
 
 
-        /*
-         * Show lobby
-         */
-        document
-          .getElementById("loadingState")
-          .classList.add("hidden");
+        // -------------------------------------------------
+        // Show lobby
+        // -------------------------------------------------
 
         document
-          .getElementById("lobbyContent")
-          .classList.remove("hidden");
+          .getElementById(
+            "loadingState"
+          )
+          .classList.add(
+            "hidden"
+          );
+
+
+        document
+          .getElementById(
+            "lobbyContent"
+          )
+          .classList.remove(
+            "hidden"
+          );
 
 
         document.getElementById(
@@ -417,24 +449,31 @@
         renderRoomMeta();
 
 
-        /*
-         * Load players
-         */
+        // -------------------------------------------------
+        // Load players
+        // -------------------------------------------------
+
         await refreshPlayers();
 
 
-        /*
-         * Subscribe to realtime lobby
-         */
+        // -------------------------------------------------
+        // Subscribe to realtime
+        // -------------------------------------------------
+
         channel =
           subscribeToLobby(
             room.id,
+
             {
-              id: currentUser.id,
+              id:
+                currentUser.id,
+
               username:
                 currentProfile.username
             },
+
             {
+
               onRoomPlayersChange:
                 refreshPlayers,
 
@@ -443,15 +482,19 @@
 
               onPresenceUpdate:
                 onPresenceUpdate
+
             }
           );
 
 
-        /*
-         * Button events
-         */
+        // -------------------------------------------------
+        // Buttons
+        // -------------------------------------------------
+
         document
-          .getElementById("readyBtn")
+          .getElementById(
+            "readyBtn"
+          )
           .addEventListener(
             "click",
             onToggleReady
@@ -459,7 +502,9 @@
 
 
         document
-          .getElementById("startBtn")
+          .getElementById(
+            "startBtn"
+          )
           .addEventListener(
             "click",
             onStartGame
@@ -467,11 +512,42 @@
 
 
         document
-          .getElementById("leaveBtn")
+          .getElementById(
+            "leaveBtn"
+          )
           .addEventListener(
             "click",
             onLeave
           );
+
+
+        // -------------------------------------------------
+        // IMPORTANT:
+        // If page loads while room is already starting,
+        // begin the countdown.
+        // -------------------------------------------------
+
+        if (
+          room.status === "starting"
+        ) {
+
+          startCountdownOnce();
+
+        }
+
+
+        // -------------------------------------------------
+        // If page loads while already playing,
+        // go directly to game.
+        // -------------------------------------------------
+
+        if (
+          room.status === "playing"
+        ) {
+
+          goToGame();
+
+        }
 
 
       } catch (err) {
@@ -480,6 +556,7 @@
           "Lobby initialization error:",
           err
         );
+
 
         showError(
           err.message ||
@@ -491,51 +568,87 @@
     }
 
 
+    // =====================================================
+    // ERROR
+    // =====================================================
+
     function showError(msg) {
 
       document
-        .getElementById("loadingState")
-        .classList.add("hidden");
+        .getElementById(
+          "loadingState"
+        )
+        .classList.add(
+          "hidden"
+        );
 
 
       document
-        .getElementById("lobbyContent")
-        .classList.add("hidden");
+        .getElementById(
+          "lobbyContent"
+        )
+        .classList.add(
+          "hidden"
+        );
+
+
+      document.getElementById(
+        "errorMsg"
+      ).textContent =
+        msg;
 
 
       document
-        .getElementById("errorMsg")
-        .textContent = msg;
-
-
-      document
-        .getElementById("errorState")
-        .classList.remove("hidden");
+        .getElementById(
+          "errorState"
+        )
+        .classList.remove(
+          "hidden"
+        );
 
     }
 
+
+    // =====================================================
+    // ROOM META
+    // =====================================================
 
     function renderRoomMeta() {
 
       document.getElementById(
         "roomMeta"
       ).textContent =
-        `${room.room_name} · ${mapLabel(room.map)} · ${durationLabel(room.round_duration_seconds)}`;
+
+        `${room.room_name} · ` +
+        `${mapLabel(room.map)} · ` +
+        `${durationLabel(
+          room.round_duration_seconds
+        )}`;
 
     }
 
 
-    let onlineUserIds = new Set();
+    // =====================================================
+    // PRESENCE
+    // =====================================================
+
+    let onlineUserIds =
+      new Set();
 
 
     function onPresenceUpdate(ids) {
 
-      onlineUserIds = ids;
+      onlineUserIds =
+        ids;
 
       renderPlayerList();
 
     }
 
+
+    // =====================================================
+    // REFRESH PLAYERS
+    // =====================================================
 
     async function refreshPlayers() {
 
@@ -574,13 +687,10 @@
         );
 
 
-        const statusLine =
-          document.getElementById(
-            "statusLine"
-          );
+        document.getElementById(
+          "statusLine"
+        ).textContent =
 
-
-        statusLine.textContent =
           err.message ||
           "Could not load players.";
 
@@ -588,6 +698,10 @@
 
     }
 
+
+    // =====================================================
+    // RENDER PLAYER LIST
+    // =====================================================
 
     function renderPlayerList() {
 
@@ -600,92 +714,104 @@
       list.innerHTML = "";
 
 
-      players.forEach((p) => {
+      players.forEach(
+        (p) => {
 
-        const row =
-          document.createElement(
-            "div"
+          const row =
+            document.createElement(
+              "div"
+            );
+
+
+          row.className =
+            "player-row";
+
+
+          const isOnline =
+            onlineUserIds.size === 0 ||
+            onlineUserIds.has(
+              p.user_id
+            );
+
+
+          row.innerHTML = `
+
+            <span
+              class="color-dot"
+              style="background:${p.color}"
+            ></span>
+
+            <div class="mini-avatar">
+
+              ${
+                p.character
+                  ? renderCharacterSVG(
+                      p.character
+                    )
+                  : ""
+              }
+
+            </div>
+
+            <div class="player-name">
+
+              ${
+                p.username ||
+                "Player"
+              }
+
+              ${
+                p.is_host
+                  ? '<span class="host-badge">HOST</span>'
+                  : ""
+              }
+
+              ${
+                !isOnline
+                  ? '<span class="offline-dot" title="disconnected"></span>'
+                  : ""
+              }
+
+            </div>
+
+            <span
+              class="ready-pill ${
+                p.is_ready
+                  ? "ready"
+                  : "notready"
+              }"
+            >
+
+              ${
+                p.is_ready
+                  ? "READY"
+                  : "NOT READY"
+              }
+
+            </span>
+
+          `;
+
+
+          list.appendChild(
+            row
           );
 
-
-        row.className =
-          "player-row";
-
-
-        const isOnline =
-          onlineUserIds.size === 0 ||
-          onlineUserIds.has(
-            p.user_id
-          );
-
-
-        row.innerHTML = `
-
-          <span
-            class="color-dot"
-            style="background:${p.color}"
-          ></span>
-
-          <div class="mini-avatar">
-
-            ${
-              p.character
-                ? renderCharacterSVG(
-                    p.character
-                  )
-                : ""
-            }
-
-          </div>
-
-          <div class="player-name">
-
-            ${p.username || "Player"}
-
-            ${
-              p.is_host
-                ? '<span class="host-badge">HOST</span>'
-                : ""
-            }
-
-            ${
-              !isOnline
-                ? '<span class="offline-dot" title="disconnected"></span>'
-                : ""
-            }
-
-          </div>
-
-          <span
-            class="ready-pill ${
-              p.is_ready
-                ? "ready"
-                : "notready"
-            }"
-          >
-
-            ${
-              p.is_ready
-                ? "READY"
-                : "NOT READY"
-            }
-
-          </span>
-
-        `;
-
-
-        list.appendChild(row);
-
-      });
+        }
+      );
 
     }
 
+
+    // =====================================================
+    // STATUS / BUTTONS
+    // =====================================================
 
     function renderStatusAndButtons() {
 
       const current =
         players.length;
+
 
       const required =
         room.player_limit;
@@ -693,13 +819,15 @@
 
       const readyCount =
         players.filter(
-          (p) => p.is_ready
+          (p) =>
+            p.is_ready
         ).length;
 
 
       document.getElementById(
         "statusLine"
       ).innerHTML =
+
         `REQUIRED PLAYERS: <b>${required}</b>
          &nbsp;|&nbsp;
          CURRENT: <b>${current}</b>
@@ -743,6 +871,30 @@
         );
 
 
+      // ---------------------------------------------------
+      // Don't allow buttons while starting/playing
+      // ---------------------------------------------------
+
+      if (
+        room.status !== "waiting"
+      ) {
+
+        startBtn.classList.add(
+          "hidden"
+        );
+
+        readyBtn.disabled =
+          true;
+
+        return;
+
+      }
+
+
+      readyBtn.disabled =
+        false;
+
+
       if (isHost) {
 
         startBtn.classList.remove(
@@ -775,6 +927,10 @@
     }
 
 
+    // =====================================================
+    // READY
+    // =====================================================
+
     async function onToggleReady() {
 
       const readyBtn =
@@ -785,7 +941,8 @@
 
       try {
 
-        readyBtn.disabled = true;
+        readyBtn.disabled =
+          true;
 
 
         await toggleReady(
@@ -795,9 +952,6 @@
         );
 
 
-        /*
-         * Refresh immediately
-         */
         await refreshPlayers();
 
 
@@ -817,12 +971,24 @@
 
       } finally {
 
-        readyBtn.disabled = false;
+        if (
+          room.status ===
+          "waiting"
+        ) {
+
+          readyBtn.disabled =
+            false;
+
+        }
 
       }
 
     }
 
+
+    // =====================================================
+    // LEAVE
+    // =====================================================
 
     async function onLeave() {
 
@@ -834,7 +1000,8 @@
 
       try {
 
-        leaveBtn.disabled = true;
+        leaveBtn.disabled =
+          true;
 
 
         await leaveRoom(
@@ -857,7 +1024,9 @@
         );
 
 
-        leaveBtn.disabled = false;
+        leaveBtn.disabled =
+          false;
+
 
         return;
 
@@ -890,13 +1059,64 @@
     }
 
 
+    // =====================================================
+    // HOST START GAME
+    // =====================================================
+
     async function onStartGame() {
+
+      const startBtn =
+        document.getElementById(
+          "startBtn"
+        );
+
+
+      // Prevent double-click
+      if (
+        startBtn.disabled ||
+        countdownStarted
+      ) {
+
+        return;
+
+      }
+
 
       try {
 
-        await beginStartSequence(
-          room.id
+        startBtn.disabled =
+          true;
+
+
+        startBtn.textContent =
+          "STARTING...";
+
+
+        const startedRoom =
+          await beginStartSequence(
+            room.id
+          );
+
+
+        // Update local room
+        room =
+          startedRoom;
+
+
+        console.log(
+          "Start sequence successfully initiated:",
+          room
         );
+
+
+        // ------------------------------------------------
+        // Start countdown immediately.
+        //
+        // This prevents waiting for realtime to arrive.
+        // ------------------------------------------------
+
+        startCountdownOnce();
+
 
       } catch (err) {
 
@@ -911,47 +1131,107 @@
           "Could not start game."
         );
 
+
+        startBtn.disabled =
+          false;
+
+
+        renderStatusAndButtons();
+
       }
 
     }
 
 
-    /*
-     * Fired when game_rooms changes
-     */
-    let countdownStarted =
-      false;
-
+    // =====================================================
+    // ROOM REALTIME CHANGE
+    // =====================================================
 
     function onRoomChange(newRoom) {
 
-      room = newRoom;
+      if (!newRoom) {
+        return;
+      }
 
+
+      console.log(
+        "Realtime room update:",
+        newRoom
+      );
+
+
+      room =
+        newRoom;
+
+
+      // ---------------------------------------------------
+      // STARTING
+      // ---------------------------------------------------
 
       if (
-        newRoom.status === "starting" &&
-        !countdownStarted
+        newRoom.status ===
+        "starting"
       ) {
 
-        countdownStarted = true;
+        startCountdownOnce();
 
-        runCountdown();
+        return;
 
       }
 
 
+      // ---------------------------------------------------
+      // PLAYING
+      // ---------------------------------------------------
+
       if (
-        newRoom.status === "playing"
+        newRoom.status ===
+        "playing"
       ) {
 
-        window.location.href =
-          "game.html?code=" +
-          room.room_code;
+        goToGame();
 
       }
 
     }
 
+
+    // =====================================================
+    // START COUNTDOWN ONLY ONCE
+    // =====================================================
+
+    function startCountdownOnce() {
+
+      if (
+        countdownStarted
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        gameRedirected
+      ) {
+
+        return;
+
+      }
+
+
+      countdownStarted =
+        true;
+
+
+      runCountdown();
+
+    }
+
+
+    // =====================================================
+    // COUNTDOWN
+    // =====================================================
 
     function runCountdown() {
 
@@ -981,54 +1261,133 @@
       let n = 3;
 
 
-      numberEl.textContent = n;
+      numberEl.textContent =
+        n;
+
 
       labelEl.textContent =
         "GET READY";
 
 
-      const interval =
+      if (
+        countdownInterval
+      ) {
+
+        clearInterval(
+          countdownInterval
+        );
+
+      }
+
+
+      countdownInterval =
         setInterval(
           async () => {
 
             n--;
 
 
+            // ---------------------------------------------
+            // 2 / 1
+            // ---------------------------------------------
+
             if (n > 0) {
 
               numberEl.textContent =
                 n;
 
-            } else {
+              return;
 
-              numberEl.textContent =
-                "GO!";
+            }
 
-              labelEl.textContent =
-                "";
 
-              clearInterval(
-                interval
+            // ---------------------------------------------
+            // GO!
+            // ---------------------------------------------
+
+            numberEl.textContent =
+              "GO!";
+
+
+            labelEl.textContent =
+              "BOMB ARENA";
+
+
+            clearInterval(
+              countdownInterval
+            );
+
+
+            countdownInterval =
+              null;
+
+
+            // ---------------------------------------------
+            // Only host changes STARTING → PLAYING
+            // ---------------------------------------------
+
+            const myPlayer =
+              players.find(
+                (p) =>
+                  p.user_id ===
+                  currentUser.id
               );
 
 
-              const isHost =
-                players.find(
-                  (p) =>
-                    p.user_id ===
-                    currentUser.id
-                )?.is_host;
+            const isHost =
+              myPlayer?.is_host === true;
 
 
-              if (isHost) {
+            if (isHost) {
 
-                setTimeout(
-                  () =>
-                    markRoomPlaying(
-                      room.id
-                    ),
-                  600
+              try {
+
+                console.log(
+                  "Host changing room to PLAYING..."
                 );
+
+
+                const playingRoom =
+                  await markRoomPlaying(
+                    room.id
+                  );
+
+
+                room =
+                  playingRoom;
+
+
+                console.log(
+                  "Room is now PLAYING:",
+                  playingRoom
+                );
+
+
+                // Redirect after database update
+                setTimeout(
+                  () => {
+                    goToGame();
+                  },
+                  500
+                );
+
+
+              } catch (err) {
+
+                console.error(
+                  "Could not mark room as playing:",
+                  err
+                );
+
+
+                alert(
+                  err.message ||
+                  "Could not start the game."
+                );
+
+
+                countdownStarted =
+                  false;
 
               }
 
@@ -1041,20 +1400,90 @@
     }
 
 
-    /*
-     * Start lobby
-     */
+    // =====================================================
+    // GO TO GAME
+    // =====================================================
+
+    function goToGame() {
+
+      if (
+        gameRedirected
+      ) {
+
+        return;
+
+      }
+
+
+      gameRedirected =
+        true;
+
+
+      if (
+        countdownInterval
+      ) {
+
+        clearInterval(
+          countdownInterval
+        );
+
+        countdownInterval =
+          null;
+
+      }
+
+
+      console.log(
+        "Entering game..."
+      );
+
+
+      const code =
+        room?.room_code ||
+        roomCodeFromUrl;
+
+
+      window.location.href =
+        "game.html?code=" +
+        encodeURIComponent(
+          code
+        );
+
+    }
+
+
+    // =====================================================
+    // START LOBBY
+    // =====================================================
+
     init();
 
+
+    // =====================================================
+    // CLEANUP
+    // =====================================================
 
     window.addEventListener(
       "beforeunload",
       () => {
 
+        if (
+          countdownInterval
+        ) {
+
+          clearInterval(
+            countdownInterval
+          );
+
+        }
+
+
         if (channel) {
 
           window.supabaseClient
-            .removeChannel(channel);
+            .removeChannel(
+              channel
+            );
 
         }
 
