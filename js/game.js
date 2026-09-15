@@ -210,74 +210,237 @@ async function initGame() {
     }
 
 
-// -----------------------------------------------------
-// VERIFY / RECOVER ACTIVE ROUND
-// -----------------------------------------------------
-//
-// The lobby is responsible for creating the round.
-// If the host reaches the game page while the room is
-// still missing current_round_id, try to repair it first.
-//
-// IMPORTANT:
-// - Host can repair/start the round.
-// - Other players must wait for the host/database to
-//   provide current_round_id.
-// -----------------------------------------------------
-
-if (!room.current_round_id) {
-
-  console.warn(
-    "Room has no current_round_id yet.",
-    room
-  );
-
-  // ---------------------------------------------------
-  // If this user is the host, attempt to repair the room.
-  // ---------------------------------------------------
-
-  if (room.host_id === currentUser.id) {
+    // -----------------------------------------------------
+    // VERIFY / WAIT FOR ACTIVE ROUND
+    // -----------------------------------------------------
+    //
+    // The host creates the round when Start Game is clicked.
+    //
+    // If the game page loads before current_round_id has
+    // appeared in the database, we wait for it instead of
+    // immediately showing:
+    //
+    // "This room has no active round."
+    //
+    // IMPORTANT:
+    // - Host attempts to create/repair the round ONCE.
+    // - Other players simply wait.
+    // - We then repeatedly reload the room from Supabase.
+    // -----------------------------------------------------
 
     console.log(
-      "Current user is host. Attempting to repair/start round..."
+      "Checking for active game round..."
     );
 
-    try {
 
-      const repairedRoom =
-        await beginStartSequence(
-          room.id
-        );
+    const MAX_ROUND_WAIT_MS =
+      10000;
 
-      if (!repairedRoom) {
-        throw new Error(
-          "Could not start the game round."
-        );
-      }
+    const ROUND_CHECK_INTERVAL_MS =
+      300;
 
-      // Re-read the room directly from Supabase.
-      room =
-        await getLobbyRoom(
-          room.id
-        );
+
+    // -----------------------------------------------------
+    // Host attempt
+    // -----------------------------------------------------
+    //
+    // Only call beginStartSequence once.
+    //
+    // This prevents accidentally creating multiple rounds
+    // while the database update is still being detected.
+    // -----------------------------------------------------
+
+    if (
+      !room.current_round_id &&
+      room.host_id === currentUser.id
+    ) {
 
       console.log(
-        "Room after round repair:",
+        "Current user is host."
+      );
+
+      console.log(
+        "Attempting to create/activate game round..."
+      );
+
+
+      try {
+
+        const startedRoom =
+          await beginStartSequence(
+            room.id
+          );
+
+
+        if (startedRoom) {
+
+          console.log(
+            "Start sequence completed:",
+            startedRoom
+          );
+
+        }
+
+
+      } catch (startError) {
+
+        console.error(
+          "Could not start/repair game round:",
+          startError
+        );
+
+        // -------------------------------------------------
+        // Do NOT immediately redirect.
+        //
+        // The database may still be updating, so we give
+        // the room a chance to appear with current_round_id.
+        // -------------------------------------------------
+
+      }
+
+    }
+
+
+    // -----------------------------------------------------
+    // Wait for current_round_id
+    // -----------------------------------------------------
+
+    const roundWaitStartedAt =
+      Date.now();
+
+
+    while (
+      !room.current_round_id
+    ) {
+
+      // ---------------------------------------------------
+      // Reload room from Supabase
+      // ---------------------------------------------------
+
+      try {
+
+        const refreshedRoom =
+          await getRoomByCode(
+            room.room_code
+          );
+
+
+        if (refreshedRoom) {
+
+          room =
+            refreshedRoom;
+
+
+          console.log(
+            "Room after reload:",
+            room
+          );
+
+        }
+
+      } catch (reloadError) {
+
+        console.error(
+          "Could not reload room:",
+          reloadError
+        );
+
+      }
+
+
+      // ---------------------------------------------------
+      // Check if current_round_id now exists
+      // ---------------------------------------------------
+
+      if (
+        room &&
+        room.current_round_id
+      ) {
+
+        console.log(
+          "================================="
+        );
+
+        console.log(
+          "ACTIVE ROUND FOUND"
+        );
+
+        console.log(
+          "Round ID:",
+          room.current_round_id
+        );
+
+        console.log(
+          "================================="
+        );
+
+        break;
+      }
+
+
+      // ---------------------------------------------------
+      // Timeout
+      // ---------------------------------------------------
+
+      if (
+        Date.now() -
+          roundWaitStartedAt >=
+        MAX_ROUND_WAIT_MS
+      ) {
+
+        console.error(
+          "Timed out waiting for active round.",
+          room
+        );
+
+
+        alert(
+          "The game round could not be started. " +
+          "Please return to the lobby and try again."
+        );
+
+
+        window.location.href =
+          "lobby.html?code=" +
+          encodeURIComponent(
+            room.room_code
+          );
+
+
+        return;
+      }
+
+
+      // ---------------------------------------------------
+      // Wait before checking again
+      // ---------------------------------------------------
+
+      await new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            ROUND_CHECK_INTERVAL_MS
+          )
+      );
+
+    }
+
+
+    // -----------------------------------------------------
+    // FINAL ACTIVE ROUND CHECK
+    // -----------------------------------------------------
+
+    if (
+      !room.current_round_id
+    ) {
+
+      console.error(
+        "No active round after waiting:",
         room
       );
 
-    } catch (repairError) {
-
-      console.error(
-        "Could not repair game round:",
-        repairError
-      );
-
       alert(
-        "The game could not start.\n\n" +
-        (
-          repairError?.message ||
-          "The room does not have an active round."
-        )
+        "This room has no active round."
       );
 
       window.location.href =
@@ -288,45 +451,20 @@ if (!room.current_round_id) {
 
       return;
     }
-  }
 
-  // ---------------------------------------------------
-  // Check again after the repair attempt.
-  // ---------------------------------------------------
 
-  if (!room.current_round_id) {
+    // -----------------------------------------------------
+    // Save active round ID
+    // -----------------------------------------------------
 
-    console.error(
-      "Room still has no current_round_id:",
-      room
+    roundId =
+      room.current_round_id;
+
+
+    console.log(
+      "Active round:",
+      roundId
     );
-
-    alert(
-      "This room has no active round yet. Please wait for the host to start the game."
-    );
-
-    window.location.href =
-      "lobby.html?code=" +
-      encodeURIComponent(
-        room.room_code
-      );
-
-    return;
-  }
-}
-
-
-// -----------------------------------------------------
-// Save active round ID
-// -----------------------------------------------------
-
-roundId =
-  room.current_round_id;
-
-console.log(
-  "Active round:",
-  roundId
-);
 
 
     // -----------------------------------------------------
@@ -1040,7 +1178,7 @@ function broadcastPosition(
     !force &&
     now -
       lastBroadcastTime <
-      BROADCAST_INTERVAL_MS
+    BROADCAST_INTERVAL_MS
   ) {
     return;
   }
