@@ -522,14 +522,22 @@
 
 
         // -------------------------------------------------
-        // IMPORTANT:
-        // If page loads while room is already starting,
-        // begin the countdown.
+        // If room is starting
         // -------------------------------------------------
 
         if (
           room.status === "starting"
         ) {
+
+          if (!room.current_round_id) {
+
+            showError(
+              "The room is starting but no active round was found."
+            );
+
+            return;
+
+          }
 
           startCountdownOnce();
 
@@ -537,13 +545,24 @@
 
 
         // -------------------------------------------------
-        // If page loads while already playing,
-        // go directly to game.
+        // If room is already playing
         // -------------------------------------------------
 
         if (
           room.status === "playing"
         ) {
+
+          // IMPORTANT:
+          // Never enter game.html if the room has no round.
+          if (!room.current_round_id) {
+
+            showError(
+              "This room is marked as playing, but it has no active round. Please create a new room."
+            );
+
+            return;
+
+          }
 
           goToGame();
 
@@ -1071,7 +1090,7 @@
         );
 
 
-      // Prevent double-click
+      // Prevent double click
       if (
         startBtn.disabled ||
         countdownStarted
@@ -1087,13 +1106,31 @@
         startBtn.disabled =
           true;
 
-
         startBtn.textContent =
           "STARTING...";
 
 
+        console.log(
+          "Starting game..."
+        );
+
+
+        // =================================================
+        // IMPORTANT FIX
+        //
+        // startGame() does ALL of these:
+        //
+        // 1. Checks the host
+        // 2. Checks players
+        // 3. Checks ready status
+        // 4. Creates game_rounds row
+        // 5. Saves round.id to current_round_id
+        // 6. Changes room to playing
+        //
+        // =================================================
+
         const startedRoom =
-          await beginStartSequence(
+          await startGame(
             room.id
           );
 
@@ -1104,16 +1141,44 @@
 
 
         console.log(
-          "Start sequence successfully initiated:",
-          room
+          "GAME STARTED SUCCESSFULLY"
+        );
+
+        console.log(
+          "ROOM ID:",
+          room.id
+        );
+
+        console.log(
+          "ROOM STATUS:",
+          room.status
+        );
+
+        console.log(
+          "CURRENT ROUND:",
+          room.current_round_id
         );
 
 
-        // ------------------------------------------------
-        // Start countdown immediately.
-        //
-        // This prevents waiting for realtime to arrive.
-        // ------------------------------------------------
+        // -------------------------------------------------
+        // SAFETY CHECK
+        // -------------------------------------------------
+
+        if (
+          room.status !== "playing" ||
+          !room.current_round_id
+        ) {
+
+          throw new Error(
+            "Game started incorrectly: no active round was attached."
+          );
+
+        }
+
+
+        // -------------------------------------------------
+        // Start countdown.
+        // -------------------------------------------------
 
         startCountdownOnce();
 
@@ -1173,7 +1238,19 @@
         "starting"
       ) {
 
-        startCountdownOnce();
+        if (
+          newRoom.current_round_id
+        ) {
+
+          startCountdownOnce();
+
+        } else {
+
+          console.warn(
+            "Room is starting but current_round_id is missing."
+          );
+
+        }
 
         return;
 
@@ -1188,6 +1265,19 @@
         newRoom.status ===
         "playing"
       ) {
+
+        if (
+          !newRoom.current_round_id
+        ) {
+
+          console.error(
+            "Room is playing but has no current_round_id."
+          );
+
+          return;
+
+        }
+
 
         goToGame();
 
@@ -1282,7 +1372,7 @@
 
       countdownInterval =
         setInterval(
-          async () => {
+          () => {
 
             n--;
 
@@ -1291,7 +1381,9 @@
             // 2 / 1
             // ---------------------------------------------
 
-            if (n > 0) {
+            if (
+              n > 0
+            ) {
 
               numberEl.textContent =
                 n;
@@ -1323,75 +1415,24 @@
 
 
             // ---------------------------------------------
-            // Only host changes STARTING → PLAYING
+            // IMPORTANT:
+            //
+            // startGame() already changed the database
+            // room to PLAYING.
+            //
+            // We do NOT call markRoomPlaying()
+            // again here.
             // ---------------------------------------------
 
-            const myPlayer =
-              players.find(
-                (p) =>
-                  p.user_id ===
-                  currentUser.id
-              );
+            setTimeout(
+              () => {
 
+                goToGame();
 
-            const isHost =
-              myPlayer?.is_host === true;
+              },
+              500
+            );
 
-
-            if (isHost) {
-
-              try {
-
-                console.log(
-                  "Host changing room to PLAYING..."
-                );
-
-
-                const playingRoom =
-                  await markRoomPlaying(
-                    room.id
-                  );
-
-
-                room =
-                  playingRoom;
-
-
-                console.log(
-                  "Room is now PLAYING:",
-                  playingRoom
-                );
-
-
-                // Redirect after database update
-                setTimeout(
-                  () => {
-                    goToGame();
-                  },
-                  500
-                );
-
-
-              } catch (err) {
-
-                console.error(
-                  "Could not mark room as playing:",
-                  err
-                );
-
-
-                alert(
-                  err.message ||
-                  "Could not start the game."
-                );
-
-
-                countdownStarted =
-                  false;
-
-              }
-
-            }
 
           },
           1000
@@ -1409,6 +1450,27 @@
       if (
         gameRedirected
       ) {
+
+        return;
+
+      }
+
+
+      // ---------------------------------------------------
+      // SAFETY:
+      // Don't enter game.html without an active round.
+      // ---------------------------------------------------
+
+      if (
+        !room ||
+        room.status !== "playing" ||
+        !room.current_round_id
+      ) {
+
+        console.error(
+          "Cannot enter game: active round is missing.",
+          room
+        );
 
         return;
 
@@ -1435,6 +1497,18 @@
 
       console.log(
         "Entering game..."
+      );
+
+
+      console.log(
+        "Room:",
+        room.id
+      );
+
+
+      console.log(
+        "Round:",
+        room.current_round_id
       );
 
 
