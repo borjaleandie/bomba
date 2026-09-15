@@ -12,8 +12,10 @@
  *
  * IMPORTANT:
  *   - The host creates the round.
- *   - The round ID is ALWAYS saved into game_rooms.current_round_id.
- *   - The room is changed to "playing" only after the round is active.
+ *   - The RPC start_game_round creates/activates the round.
+ *   - The round ID MUST be saved into game_rooms.current_round_id.
+ *   - The room MUST NOT be considered successfully started
+ *     unless current_round_id exists.
  * ---------------------------------------------------------
  */
 
@@ -68,9 +70,13 @@ async function fetchRoomPlayers(roomId) {
     error
   } = await window.supabaseClient
     .from("room_players")
-    .select(
-      "id, user_id, is_ready, is_host, joined_at"
-    )
+    .select(`
+      id,
+      user_id,
+      is_ready,
+      is_host,
+      joined_at
+    `)
     .eq("room_id", roomId)
     .is("left_at", null)
     .order("joined_at", {
@@ -270,6 +276,7 @@ async function getLobbyRoom(roomId) {
     .limit(1);
 
   if (error) {
+    console.error("Get room error:", error);
     throw error;
   }
 
@@ -282,7 +289,57 @@ async function getLobbyRoom(roomId) {
 
 
 // =========================================================
-// CREATE GAME ROUND
+// GET CURRENT ROUND
+// =========================================================
+
+async function getCurrentGameRound(roomId) {
+  if (!roomId) {
+    throw new Error("Room ID is required.");
+  }
+
+  const room = await getLobbyRoom(roomId);
+
+  if (!room.current_round_id) {
+    return null;
+  }
+
+  const {
+    data,
+    error
+  } = await window.supabaseClient
+    .from("game_rounds")
+    .select("*")
+    .eq("id", room.current_round_id)
+    .eq("room_id", roomId)
+    .limit(1);
+
+  if (error) {
+    console.error("Get current round error:", error);
+    throw error;
+  }
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  return data[0];
+}
+
+
+// =========================================================
+// CREATE / START GAME ROUND
+// =========================================================
+//
+// IMPORTANT:
+// This is the ONLY createGameRound() function.
+//
+// The Supabase RPC is responsible for:
+//   1. Creating the game round
+//   2. Setting the round status
+//   3. Saving the round ID into game_rooms.current_round_id
+//   4. Setting the room status appropriately
+//
+// We verify everything after the RPC returns.
 // =========================================================
 
 async function createGameRound(
@@ -297,83 +354,183 @@ async function createGameRound(
     throw new Error("Host ID is required.");
   }
 
+  const user = await getLobbyUser();
+
+  if (!user || user.id !== hostId) {
+    throw new Error(
+      "Only the host can start the game."
+    );
+  }
+
   const room = await getLobbyRoom(roomId);
 
   if (room.host_id !== hostId) {
     throw new Error(
-      "Only the host can create the game round."
+      "Only the host can start the game."
     );
   }
 
+  console.log("================================");
+  console.log("STARTING GAME");
+  console.log("ROOM ID:", roomId);
+  console.log("HOST ID:", hostId);
+  console.log("ROOM STATUS:", room.status);
+  console.log("CURRENT ROUND:", room.current_round_id);
+  console.log("================================");
+
 
   // -------------------------------------------------------
-  // If current_round_id already exists, verify it.
+  // If a valid current round already exists, use it.
   // -------------------------------------------------------
 
   if (room.current_round_id) {
 
-    const {
-      data: existingRounds,
-      error: existingError
-    } = await window.supabaseClient
-      .from("game_rounds")
-      .select("*")
-      .eq("id", room.current_round_id)
-      .limit(1);
+    const existingRound =
+      await getCurrentGameRound(roomId);
 
-    if (existingError) {
-      throw existingError;
-    }
+    if (existingRound) {
 
-    if (
-      existingRounds &&
-      existingRounds.length > 0
-    ) {
       console.log(
-        "Using existing game round:",
-        existingRounds[0]
+        "Existing round found:",
+        existingRound.id
       );
 
-      return existingRounds[0];
+      return existingRound;
     }
 
-    // current_round_id points to something that doesn't exist.
-    // Clear it before creating a new round.
-    await window.supabaseClient
+    // current_round_id was invalid.
+    console.warn(
+      "current_round_id points to a missing round. Clearing it."
+    );
+
+    const {
+      error: clearError
+    } = await window.supabaseClient
       .from("game_rooms")
       .update({
         current_round_id: null
       })
       .eq("id", roomId)
       .eq("host_id", hostId);
+
+    if (clearError) {
+      throw clearError;
+    }
   }
 
 
   // -------------------------------------------------------
-  // Determine next round number.
+  // Call Supabase RPC.
   // -------------------------------------------------------
 
   const {
-    count: roundCount,
-    error: countError
+    data,
+    error
   } = await window.supabaseClient
-    .from("game_rounds")
-    .select("id", {
-      count: "exact",
-      head: true
-    })
-    .eq("room_id", roomId);
+    .rpc("start_game_round", {
+      p_room_id: roomId
+    });
 
-  if (countError) {
-    throw countError;
+  if (error) {
+    console.error(
+      "START GAME RPC ERROR:",
+      error
+    );
+
+    throw new Error(
+      error.message ||
+      "Could not start the game."
+    );
   }
-
-  const roundNumber =
-    (roundCount || 0) + 1;
 
 
   // -------------------------------------------------------
-  // Create round.
+  // Get round returned by RPC.
+  // -------------------------------------------------------
+
+  const round =
+    Array.isArray(data)
+      ? data[0]
+      : data;
+
+  console.log(
+    "RPC RETURNED:",
+    data
+  );
+
+
+  if (!round || !round.id) {
+    throw new Error(
+      "Game round was not created."
+    );
+  }
+
+
+  console.log(
+    "GAME ROUND CREATED:",
+    round.id
+  );
+
+
+  // -------------------------------------------------------
+  // IMPORTANT:
+  // Re-read the room after RPC.
+  // -------------------------------------------------------
+
+  const updatedRoom =
+    await getLobbyRoom(roomId);
+
+  console.log(
+    "UPDATED ROOM:",
+    updatedRoom
+  );
+
+
+  // -------------------------------------------------------
+  // CRITICAL CHECK #1
+  // -------------------------------------------------------
+
+  if (!updatedRoom.current_round_id) {
+
+    console.error(
+      "RPC created a round but current_round_id is NULL.",
+      {
+        roomId,
+        roundId: round.id,
+        room: updatedRoom
+      }
+    );
+
+    throw new Error(
+      "Game round was created, but the room current_round_id was not saved."
+    );
+  }
+
+
+  // -------------------------------------------------------
+  // CRITICAL CHECK #2
+  // -------------------------------------------------------
+
+  if (
+    updatedRoom.current_round_id !== round.id
+  ) {
+
+    console.error(
+      "Round ID mismatch.",
+      {
+        returnedRound: round.id,
+        roomRound: updatedRoom.current_round_id
+      }
+    );
+
+    throw new Error(
+      "Room current_round_id does not match the created round."
+    );
+  }
+
+
+  // -------------------------------------------------------
+  // Verify the round exists in the database.
   // -------------------------------------------------------
 
   const {
@@ -381,21 +538,12 @@ async function createGameRound(
     error: roundError
   } = await window.supabaseClient
     .from("game_rounds")
-    .insert({
-      room_id: roomId,
-      round_number: roundNumber,
-      status: "playing",
-      started_at: new Date().toISOString()
-    })
-    .select()
+    .select("*")
+    .eq("id", round.id)
+    .eq("room_id", roomId)
     .limit(1);
 
   if (roundError) {
-    console.error(
-      "Create game round error:",
-      roundError
-    );
-
     throw roundError;
   }
 
@@ -404,68 +552,136 @@ async function createGameRound(
     roundRows.length === 0
   ) {
     throw new Error(
-      "Game round was created but could not be loaded."
+      "The created game round could not be found."
     );
   }
 
-  const round = roundRows[0];
+
+  const verifiedRound =
+    roundRows[0];
 
 
   // -------------------------------------------------------
-  // CRITICAL:
-  // Save the round ID into the room.
+  // If RPC returned a round that is not playing,
+  // activate it before allowing the room to continue.
   // -------------------------------------------------------
 
-  const {
-    data: updatedRooms,
-    error: updateError
-  } = await window.supabaseClient
-    .from("game_rooms")
-    .update({
-      current_round_id: round.id
-    })
-    .eq("id", roomId)
-    .eq("host_id", hostId)
-    .select()
-    .limit(1);
+  if (verifiedRound.status !== "playing") {
 
-  if (updateError) {
-
-    await window.supabaseClient
+    const {
+      data: activatedRounds,
+      error: activateError
+    } = await window.supabaseClient
       .from("game_rounds")
-      .delete()
-      .eq("id", round.id);
+      .update({
+        status: "playing",
+        started_at:
+          verifiedRound.started_at ||
+          new Date().toISOString()
+      })
+      .eq("id", verifiedRound.id)
+      .select()
+      .limit(1);
 
-    throw updateError;
+    if (activateError) {
+      throw activateError;
+    }
+
+    if (
+      !activatedRounds ||
+      activatedRounds.length === 0
+    ) {
+      throw new Error(
+        "Could not activate the game round."
+      );
+    }
+  }
+
+
+  // -------------------------------------------------------
+  // Re-read room one final time.
+  // -------------------------------------------------------
+
+  const finalRoom =
+    await getLobbyRoom(roomId);
+
+
+  // -------------------------------------------------------
+  // FINAL SAFETY CHECK
+  // -------------------------------------------------------
+
+  if (!finalRoom.current_round_id) {
+    throw new Error(
+      "Game cannot start because current_round_id is missing."
+    );
   }
 
   if (
-    !updatedRooms ||
-    updatedRooms.length === 0
+    finalRoom.current_round_id !== verifiedRound.id
   ) {
-
-    await window.supabaseClient
-      .from("game_rounds")
-      .delete()
-      .eq("id", round.id);
-
     throw new Error(
-      "Could not attach the game round to the room."
+      "Game room and game round IDs do not match."
     );
   }
 
 
-  console.log(
-    "NEW ACTIVE ROUND:",
-    round.id
-  );
+  // -------------------------------------------------------
+  // If the RPC didn't change the room to playing,
+  // safely change it now because the round is verified.
+  // -------------------------------------------------------
 
-  console.log(
-    "ROOM CURRENT ROUND:",
-    updatedRooms[0].current_round_id
-  );
+  if (finalRoom.status !== "playing") {
 
-  return round;
+    const {
+      data: playingRooms,
+      error: playingError
+    } = await window.supabaseClient
+      .from("game_rooms")
+      .update({
+        status: "playing",
+        started_at:
+          finalRoom.started_at ||
+          new Date().toISOString(),
+        current_round_id:
+          finalRoom.current_round_id
+      })
+      .eq("id", roomId)
+      .eq("host_id", hostId)
+      .select()
+      .limit(1);
+
+    if (playingError) {
+      throw playingError;
+    }
+
+    if (
+      !playingRooms ||
+      playingRooms.length === 0
+    ) {
+      throw new Error(
+        "Could not change the room to playing."
+      );
+    }
+
+    console.log(
+      "ROOM CHANGED TO PLAYING:",
+      playingRooms[0]
+    );
+  }
+
+
+  console.log("================================");
+  console.log("GAME STARTED SUCCESSFULLY");
+  console.log("ROOM:", roomId);
+  console.log("ROUND:", verifiedRound.id);
+  console.log(
+    "CURRENT ROUND:",
+    finalRoom.current_round_id
+  );
+  console.log("================================");
+
+
+  return verifiedRound;
 }
 
 
@@ -476,13 +692,15 @@ async function createGameRound(
 async function beginStartSequence(
   roomId
 ) {
-  const user = await getLobbyUser();
-
   if (!roomId) {
     throw new Error("Room ID is required.");
   }
 
-  const room = await getLobbyRoom(roomId);
+  const user =
+    await getLobbyUser();
+
+  let room =
+    await getLobbyRoom(roomId);
 
 
   // -------------------------------------------------------
@@ -497,37 +715,151 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Already playing.
+  // ROOM IS ALREADY PLAYING
   // -------------------------------------------------------
 
   if (room.status === "playing") {
 
-    // Make sure the active round still exists.
-    if (!room.current_round_id) {
-      throw new Error(
-        "Room is marked playing but has no current round."
-      );
+    // Healthy playing room.
+    if (room.current_round_id) {
+
+      const round =
+        await getCurrentGameRound(roomId);
+
+      if (round) {
+        return room;
+      }
     }
 
-    return room;
-  }
+
+    // -----------------------------------------------------
+    // IMPORTANT:
+    // The room is playing but current_round_id is NULL.
+    //
+    // This repairs the exact broken state you showed.
+    // -----------------------------------------------------
+
+    console.warn(
+      "Room is playing but current_round_id is missing."
+    );
+
+    console.log(
+      "Attempting to repair room by starting a round..."
+    );
 
 
-  // -------------------------------------------------------
-  // Already starting.
-  // -------------------------------------------------------
-
-  if (room.status === "starting") {
-
-    // Make sure current_round_id exists.
-    if (!room.current_round_id) {
-
-      const round = await createGameRound(
+    const repairedRound =
+      await createGameRound(
         roomId,
         user.id
       );
 
-      return await getLobbyRoom(roomId);
+
+    room =
+      await getLobbyRoom(roomId);
+
+
+    if (
+      !room.current_round_id ||
+      room.current_round_id !== repairedRound.id
+    ) {
+      throw new Error(
+        "Could not repair the room. current_round_id is still missing."
+      );
+    }
+
+
+    return room;
+  }
+
+
+  // -------------------------------------------------------
+  // ROOM IS STARTING
+  // -------------------------------------------------------
+
+  if (room.status === "starting") {
+
+    if (room.current_round_id) {
+
+      const round =
+        await getCurrentGameRound(roomId);
+
+      if (round) {
+
+        // Make sure round is playing.
+        if (round.status !== "playing") {
+
+          const {
+            error: activateError
+          } = await window.supabaseClient
+            .from("game_rounds")
+            .update({
+              status: "playing",
+              started_at:
+                round.started_at ||
+                new Date().toISOString()
+            })
+            .eq("id", round.id);
+
+          if (activateError) {
+            throw activateError;
+          }
+        }
+
+
+        // Change room to playing.
+        const {
+          data: playingRooms,
+          error: playingError
+        } = await window.supabaseClient
+          .from("game_rooms")
+          .update({
+            status: "playing",
+            started_at:
+              room.started_at ||
+              new Date().toISOString(),
+            current_round_id:
+              room.current_round_id
+          })
+          .eq("id", roomId)
+          .eq("host_id", user.id)
+          .eq("status", "starting")
+          .select()
+          .limit(1);
+
+        if (playingError) {
+          throw playingError;
+        }
+
+        if (
+          playingRooms &&
+          playingRooms.length > 0
+        ) {
+          return playingRooms[0];
+        }
+
+        return await getLobbyRoom(roomId);
+      }
+    }
+
+
+    // No valid round.
+    const round =
+      await createGameRound(
+        roomId,
+        user.id
+      );
+
+    room =
+      await getLobbyRoom(roomId);
+
+    if (
+      !room.current_round_id ||
+      room.current_round_id !== round.id
+    ) {
+      throw new Error(
+        "Round was created but could not be attached to the room."
+      );
     }
 
     return room;
@@ -535,7 +867,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Must be waiting.
+  // MUST BE WAITING
   // -------------------------------------------------------
 
   if (room.status !== "waiting") {
@@ -546,7 +878,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Get active players.
+  // GET ACTIVE PLAYERS
   // -------------------------------------------------------
 
   const {
@@ -575,7 +907,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Check all ready.
+  // CHECK ALL READY
   // -------------------------------------------------------
 
   const allReady =
@@ -600,9 +932,16 @@ async function beginStartSequence(
   }
 
 
-  // =======================================================
-  // CREATE AND ATTACH ROUND
-  // =======================================================
+  // -------------------------------------------------------
+  // CREATE ROUND
+  // -------------------------------------------------------
+  //
+  // The RPC handles the actual transition.
+  //
+  // We DO NOT manually change waiting → starting here.
+  //
+  // This prevents the old flow from fighting with the RPC.
+  // -------------------------------------------------------
 
   const round =
     await createGameRound(
@@ -612,72 +951,62 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Change waiting → starting.
+  // FINAL ROOM CHECK
   // -------------------------------------------------------
 
-  const {
-    data: updatedRooms,
-    error: updateError
-  } = await window.supabaseClient
-    .from("game_rooms")
-    .update({
-      status: "starting",
-      current_round_id: round.id
-    })
-    .eq("id", roomId)
-    .eq("host_id", user.id)
-    .eq("status", "waiting")
-    .select()
-    .limit(1);
+  room =
+    await getLobbyRoom(roomId);
 
-  if (updateError) {
-    throw updateError;
+
+  if (!room.current_round_id) {
+    throw new Error(
+      "Game started but current_round_id is missing."
+    );
   }
 
 
-  // -------------------------------------------------------
-  // Another request may have started it.
-  // -------------------------------------------------------
-
   if (
-    !updatedRooms ||
-    updatedRooms.length === 0
+    room.current_round_id !== round.id
   ) {
-
-    const latestRoom =
-      await getLobbyRoom(roomId);
-
-    if (
-      latestRoom.status === "starting" ||
-      latestRoom.status === "playing"
-    ) {
-
-      return latestRoom;
-    }
-
     throw new Error(
-      "The room could not be started."
+      "Game started but the room points to a different round."
+    );
+  }
+
+
+  if (room.status !== "playing") {
+    throw new Error(
+      `Round exists but room status is ${room.status}.`
     );
   }
 
 
   console.log(
-    "ROOM IS STARTING:",
-    updatedRooms[0]
+    "FINAL STARTED ROOM:",
+    room
   );
 
-  return updatedRooms[0];
+
+  return room;
 }
 
 
 // =========================================================
 // MARK ROOM AS PLAYING
 // =========================================================
+//
+// Kept for compatibility with existing lobby/game code.
+//
+// If another JS file calls markRoomPlaying(), this function
+// verifies the round before allowing the room to become
+// "playing".
+// =========================================================
 
 async function markRoomPlaying(
   roomId
 ) {
-  const user = await getLobbyUser();
+  const user =
+    await getLobbyUser();
 
   if (!roomId) {
     throw new Error("Room ID is required.");
@@ -705,9 +1034,28 @@ async function markRoomPlaying(
   if (room.status === "playing") {
 
     if (!room.current_round_id) {
-      throw new Error(
-        "Room is playing but has no active round."
+
+      console.warn(
+        "Room is playing without a round. Repairing..."
       );
+
+      const round =
+        await createGameRound(
+          roomId,
+          user.id
+        );
+
+      room =
+        await getLobbyRoom(roomId);
+
+      if (
+        !room.current_round_id ||
+        room.current_round_id !== round.id
+      ) {
+        throw new Error(
+          "Could not repair the playing room."
+        );
+      }
     }
 
     return room;
@@ -715,7 +1063,16 @@ async function markRoomPlaying(
 
 
   // -------------------------------------------------------
-  // Must be starting.
+  // If waiting, use the normal start sequence.
+  // -------------------------------------------------------
+
+  if (room.status === "waiting") {
+    return await beginStartSequence(roomId);
+  }
+
+
+  // -------------------------------------------------------
+  // Starting state.
   // -------------------------------------------------------
 
   if (room.status !== "starting") {
@@ -726,53 +1083,47 @@ async function markRoomPlaying(
 
 
   // -------------------------------------------------------
-  // CRITICAL:
-  // Make absolutely sure a round exists.
+  // Make sure current_round_id exists.
   // -------------------------------------------------------
 
   if (!room.current_round_id) {
 
-    await createGameRound(
-      roomId,
-      user.id
-    );
+    const round =
+      await createGameRound(
+        roomId,
+        user.id
+      );
 
     room =
       await getLobbyRoom(roomId);
+
+    if (
+      !room.current_round_id ||
+      room.current_round_id !== round.id
+    ) {
+      throw new Error(
+        "Round was created but current_round_id is missing."
+      );
+    }
   }
 
 
   // -------------------------------------------------------
-  // Verify round actually exists.
+  // Verify round.
   // -------------------------------------------------------
 
-  const {
-    data: roundRows,
-    error: roundFetchError
-  } = await window.supabaseClient
-    .from("game_rounds")
-    .select("*")
-    .eq("id", room.current_round_id)
-    .limit(1);
+  const round =
+    await getCurrentGameRound(roomId);
 
-  if (roundFetchError) {
-    throw roundFetchError;
-  }
-
-  if (
-    !roundRows ||
-    roundRows.length === 0
-  ) {
+  if (!round) {
     throw new Error(
       "The room references a round that does not exist."
     );
   }
 
-  const round = roundRows[0];
-
 
   // -------------------------------------------------------
-  // Activate round.
+  // Activate round if necessary.
   // -------------------------------------------------------
 
   if (round.status !== "playing") {
@@ -788,7 +1139,7 @@ async function markRoomPlaying(
           round.started_at ||
           new Date().toISOString()
       })
-      .eq("id", room.current_round_id)
+      .eq("id", round.id)
       .select()
       .limit(1);
 
@@ -808,7 +1159,7 @@ async function markRoomPlaying(
 
 
   // -------------------------------------------------------
-  // Change room → playing.
+  // Change room to playing.
   // -------------------------------------------------------
 
   const {
@@ -836,7 +1187,7 @@ async function markRoomPlaying(
 
 
   // -------------------------------------------------------
-  // If another request changed it already.
+  // Another request may have changed it already.
   // -------------------------------------------------------
 
   if (
@@ -864,6 +1215,7 @@ async function markRoomPlaying(
     "ROOM IS NOW PLAYING:",
     updatedRooms[0]
   );
+
 
   return updatedRooms[0];
 }
