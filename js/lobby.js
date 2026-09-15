@@ -8,6 +8,7 @@
  *   characters
  *   game_rooms
  *   room_players
+ *   game_rounds
  * ---------------------------------------------------------
  */
 
@@ -36,29 +37,19 @@ async function getLobbyUser() {
     error
   } = await window.supabaseClient.auth.getUser();
 
-
   if (error) {
-
-    console.error(
-      "Auth error:",
-      error
-    );
+    console.error("Auth error:", error);
 
     throw new Error(
       "Could not verify your login session."
     );
-
   }
 
-
   if (!user) {
-
     throw new Error(
       "You must be logged in."
     );
-
   }
-
 
   return user;
 }
@@ -71,13 +62,10 @@ async function getLobbyUser() {
 async function fetchRoomPlayers(roomId) {
 
   if (!roomId) {
-
     throw new Error(
       "Room ID is required."
     );
-
   }
-
 
   const {
     data: roomPlayers,
@@ -93,34 +81,26 @@ async function fetchRoomPlayers(roomId) {
       ascending: true
     });
 
-
   if (error) {
-
     console.error(
       "Fetch room players error:",
       error
     );
 
     throw error;
-
   }
-
 
   if (
     !roomPlayers ||
     roomPlayers.length === 0
   ) {
-
     return [];
-
   }
-
 
   const userIds =
     roomPlayers.map(
-      (player) => player.user_id
+      player => player.user_id
     );
-
 
   const [
     {
@@ -147,47 +127,36 @@ async function fetchRoomPlayers(roomId) {
 
   ]);
 
-
   if (profileError) {
-
     console.error(
       "Fetch profiles error:",
       profileError
     );
 
     throw profileError;
-
   }
 
-
   if (characterError) {
-
     console.error(
       "Fetch characters error:",
       characterError
     );
 
     throw characterError;
-
   }
-
 
   return roomPlayers.map(
     (rp, index) => {
 
       const profile =
         profiles?.find(
-          (p) =>
-            p.id === rp.user_id
+          p => p.id === rp.user_id
         );
-
 
       const character =
         characters?.find(
-          (c) =>
-            c.user_id === rp.user_id
+          c => c.user_id === rp.user_id
         );
-
 
       return {
 
@@ -227,15 +196,11 @@ async function toggleReady(
   const user =
     await getLobbyUser();
 
-
   if (user.id !== userId) {
-
     throw new Error(
       "You can only change your own ready status."
     );
-
   }
-
 
   const {
     data,
@@ -252,30 +217,23 @@ async function toggleReady(
     .select()
     .limit(1);
 
-
   if (error) {
-
     console.error(
       "Toggle ready error:",
       error
     );
 
     throw error;
-
   }
-
 
   if (
     !data ||
     data.length === 0
   ) {
-
     throw new Error(
       "You are not currently in this room."
     );
-
   }
-
 
   return data[0];
 }
@@ -293,15 +251,11 @@ async function leaveRoom(
   const user =
     await getLobbyUser();
 
-
   if (user.id !== userId) {
-
     throw new Error(
       "You can only leave your own room membership."
     );
-
   }
-
 
   const {
     data,
@@ -318,20 +272,270 @@ async function leaveRoom(
     .select()
     .limit(1);
 
-
   if (error) {
-
     console.error(
       "Leave room error:",
       error
     );
 
     throw error;
+  }
 
+  return data?.[0] || null;
+}
+
+
+// =========================================================
+// CREATE GAME ROUND
+// =========================================================
+
+async function createGameRound(
+  roomId,
+  hostId
+) {
+
+  if (!roomId) {
+    throw new Error(
+      "Room ID is required."
+    );
+  }
+
+  if (!hostId) {
+    throw new Error(
+      "Host ID is required."
+    );
   }
 
 
-  return data?.[0] || null;
+  // -------------------------------------------------------
+  // Check if room already has an active round
+  // -------------------------------------------------------
+
+  const {
+    data: roomRows,
+    error: roomError
+  } = await window.supabaseClient
+    .from("game_rooms")
+    .select(
+      "id, host_id, current_round_id"
+    )
+    .eq("id", roomId)
+    .limit(1);
+
+  if (roomError) {
+    throw roomError;
+  }
+
+  if (
+    !roomRows ||
+    roomRows.length === 0
+  ) {
+    throw new Error(
+      "Room not found."
+    );
+  }
+
+  const currentRoom =
+    roomRows[0];
+
+
+  if (
+    currentRoom.host_id !== hostId
+  ) {
+    throw new Error(
+      "Only the host can create the game round."
+    );
+  }
+
+
+  // -------------------------------------------------------
+  // If a round already exists, use it
+  // -------------------------------------------------------
+
+  if (
+    currentRoom.current_round_id
+  ) {
+
+    const {
+      data: existingRounds,
+      error: existingError
+    } = await window.supabaseClient
+      .from("game_rounds")
+      .select("*")
+      .eq(
+        "id",
+        currentRoom.current_round_id
+      )
+      .limit(1);
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (
+      existingRounds &&
+      existingRounds.length > 0
+    ) {
+
+      console.log(
+        "Using existing game round:",
+        existingRounds[0]
+      );
+
+      return existingRounds[0];
+
+    }
+  }
+
+
+  // -------------------------------------------------------
+  // Determine round number
+  // -------------------------------------------------------
+
+  const {
+    count: roundCount,
+    error: countError
+  } = await window.supabaseClient
+    .from("game_rounds")
+    .select(
+      "id",
+      {
+        count: "exact",
+        head: true
+      }
+    )
+    .eq(
+      "room_id",
+      roomId
+    );
+
+  if (countError) {
+    throw countError;
+  }
+
+  const roundNumber =
+    (roundCount || 0) + 1;
+
+
+  // -------------------------------------------------------
+  // Create round
+  // -------------------------------------------------------
+
+  const {
+    data: roundRows,
+    error: roundError
+  } = await window.supabaseClient
+    .from("game_rounds")
+    .insert({
+
+      room_id:
+        roomId,
+
+      round_number:
+        roundNumber,
+
+      status:
+        "starting",
+
+      started_at:
+        new Date().toISOString()
+
+    })
+    .select()
+    .limit(1);
+
+  if (roundError) {
+
+    console.error(
+      "Create game round error:",
+      roundError
+    );
+
+    throw roundError;
+  }
+
+  if (
+    !roundRows ||
+    roundRows.length === 0
+  ) {
+    throw new Error(
+      "Game round was created but could not be loaded."
+    );
+  }
+
+  const round =
+    roundRows[0];
+
+
+  // -------------------------------------------------------
+  // Save round ID into room
+  // -------------------------------------------------------
+
+  const {
+    data: updatedRooms,
+    error: updateError
+  } = await window.supabaseClient
+    .from("game_rooms")
+    .update({
+      current_round_id:
+        round.id
+    })
+    .eq(
+      "id",
+      roomId
+    )
+    .eq(
+      "host_id",
+      hostId
+    )
+    .select()
+    .limit(1);
+
+  if (updateError) {
+
+    // Cleanup round if room update failed
+    await window.supabaseClient
+      .from("game_rounds")
+      .delete()
+      .eq(
+        "id",
+        round.id
+      );
+
+    throw updateError;
+  }
+
+  if (
+    !updatedRooms ||
+    updatedRooms.length === 0
+  ) {
+
+    await window.supabaseClient
+      .from("game_rounds")
+      .delete()
+      .eq(
+        "id",
+        round.id
+      );
+
+    throw new Error(
+      "Could not attach the game round to the room."
+    );
+  }
+
+
+  console.log(
+    "Game round created:",
+    round
+  );
+
+  console.log(
+    "Room current_round_id:",
+    round.id
+  );
+
+
+  return round;
 }
 
 
@@ -346,18 +550,15 @@ async function beginStartSequence(
   const user =
     await getLobbyUser();
 
-
   if (!roomId) {
-
     throw new Error(
       "Room ID is required."
     );
-
   }
 
 
   // -------------------------------------------------------
-  // Get current room
+  // Get room
   // -------------------------------------------------------
 
   const {
@@ -369,44 +570,27 @@ async function beginStartSequence(
       id,
       host_id,
       status,
-      player_limit
+      player_limit,
+      current_round_id
     `)
     .eq("id", roomId)
     .limit(1);
 
-
   if (roomError) {
-
-    console.error(
-      "Get room before start error:",
-      roomError
-    );
-
     throw roomError;
-
   }
-
 
   if (
     !rooms ||
     rooms.length === 0
   ) {
-
     throw new Error(
       "Room not found."
     );
-
   }
-
 
   const room =
     rooms[0];
-
-
-  console.log(
-    "Room before start:",
-    room
-  );
 
 
   // -------------------------------------------------------
@@ -416,18 +600,14 @@ async function beginStartSequence(
   if (
     room.host_id !== user.id
   ) {
-
     throw new Error(
       "Only the host can start the game."
     );
-
   }
 
 
   // -------------------------------------------------------
-  // IMPORTANT:
-  // If another call already changed the room
-  // to "starting", don't throw an error.
+  // Already starting
   // -------------------------------------------------------
 
   if (
@@ -444,7 +624,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // If already playing, simply return the room.
+  // Already playing
   // -------------------------------------------------------
 
   if (
@@ -461,18 +641,12 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Only WAITING rooms can begin.
+  // Must be waiting
   // -------------------------------------------------------
 
   if (
     room.status !== "waiting"
   ) {
-
-    console.warn(
-      "Cannot start room. Current status:",
-      room.status
-    );
-
 
     throw new Error(
       `This room cannot be started right now. Current status: ${room.status}`
@@ -496,72 +670,52 @@ async function beginStartSequence(
       is_ready,
       is_host
     `)
-    .eq("room_id", roomId)
-    .is("left_at", null);
-
-
-  if (playersError) {
-
-    console.error(
-      "Get room players error:",
-      playersError
+    .eq(
+      "room_id",
+      roomId
+    )
+    .is(
+      "left_at",
+      null
     );
 
+  if (playersError) {
     throw playersError;
-
   }
-
 
   if (
     !players ||
-    players.length === 0
-  ) {
-
-    throw new Error(
-      "There are no players in this room."
-    );
-
-  }
-
-
-  // -------------------------------------------------------
-  // Require at least 2 players
-  // -------------------------------------------------------
-
-  if (
     players.length < 2
   ) {
-
     throw new Error(
       "At least 2 players are required to start the game."
     );
-
   }
 
 
   // -------------------------------------------------------
-  // Check all players are ready
+  // Check all ready
   // -------------------------------------------------------
 
   const allReady =
     players.every(
-      (player) =>
+      player =>
         player.is_ready === true
     );
-
 
   if (!allReady) {
 
     const notReady =
       players.filter(
-        (player) =>
+        player =>
           !player.is_ready
       ).length;
 
-
     throw new Error(
       `${notReady} player${
-        notReady === 1 ? "" : "s"
+        notReady === 1
+          ? ""
+          : "s"
       } ${
         notReady === 1
           ? "is"
@@ -572,8 +726,19 @@ async function beginStartSequence(
   }
 
 
+  // =======================================================
+  // CREATE ROUND BEFORE STARTING
+  // =======================================================
+
+  const round =
+    await createGameRound(
+      roomId,
+      user.id
+    );
+
+
   // -------------------------------------------------------
-  // Change WAITING → STARTING
+  // Change waiting → starting
   // -------------------------------------------------------
 
   const {
@@ -582,30 +747,34 @@ async function beginStartSequence(
   } = await window.supabaseClient
     .from("game_rooms")
     .update({
-      status: "starting"
+      status:
+        "starting",
+
+      current_round_id:
+        round.id
     })
-    .eq("id", roomId)
-    .eq("host_id", user.id)
-    .eq("status", "waiting")
+    .eq(
+      "id",
+      roomId
+    )
+    .eq(
+      "host_id",
+      user.id
+    )
+    .eq(
+      "status",
+      "waiting"
+    )
     .select()
     .limit(1);
 
-
   if (updateError) {
-
-    console.error(
-      "Start room error:",
-      updateError
-    );
-
     throw updateError;
-
   }
 
 
   // -------------------------------------------------------
-  // If another request started it at the same time,
-  // retrieve the latest room instead of showing an error.
+  // If another request already changed status
   // -------------------------------------------------------
 
   if (
@@ -622,33 +791,30 @@ async function beginStartSequence(
         id,
         host_id,
         status,
-        player_limit
+        player_limit,
+        current_round_id
       `)
-      .eq("id", roomId)
+      .eq(
+        "id",
+        roomId
+      )
       .limit(1);
-
 
     if (latestError) {
       throw latestError;
     }
 
-
     const latestRoom =
       latestRooms?.[0];
 
-
     if (
-      latestRoom?.status === "starting"
+      latestRoom?.status ===
+      "starting"
     ) {
-
-      console.log(
-        "Room was already changed to starting."
-      );
 
       return latestRoom;
 
     }
-
 
     throw new Error(
       "The room could not be started."
@@ -680,13 +846,15 @@ async function markRoomPlaying(
 
 
   if (!roomId) {
-
     throw new Error(
       "Room ID is required."
     );
-
   }
 
+
+  // -------------------------------------------------------
+  // Get room
+  // -------------------------------------------------------
 
   const {
     data: rooms,
@@ -696,52 +864,38 @@ async function markRoomPlaying(
     .select(`
       id,
       host_id,
-      status
+      status,
+      current_round_id
     `)
-    .eq("id", roomId)
+    .eq(
+      "id",
+      roomId
+    )
     .limit(1);
 
-
   if (roomError) {
-
-    console.error(
-      "Get room before playing error:",
-      roomError
-    );
-
     throw roomError;
-
   }
-
 
   if (
     !rooms ||
     rooms.length === 0
   ) {
-
     throw new Error(
       "Room not found."
     );
-
   }
-
 
   const room =
     rooms[0];
 
 
-  // -------------------------------------------------------
-  // Check host
-  // -------------------------------------------------------
-
   if (
     room.host_id !== user.id
   ) {
-
     throw new Error(
       "Only the host can start the game."
     );
-
   }
 
 
@@ -752,19 +906,9 @@ async function markRoomPlaying(
   if (
     room.status === "playing"
   ) {
-
-    console.log(
-      "Room is already playing."
-    );
-
     return room;
-
   }
 
-
-  // -------------------------------------------------------
-  // Must currently be starting
-  // -------------------------------------------------------
 
   if (
     room.status !== "starting"
@@ -778,7 +922,68 @@ async function markRoomPlaying(
 
 
   // -------------------------------------------------------
-  // Change STARTING → PLAYING
+  // Make sure round exists
+  // -------------------------------------------------------
+
+  if (
+    !room.current_round_id
+  ) {
+
+    const round =
+      await createGameRound(
+        roomId,
+        user.id
+      );
+
+    room.current_round_id =
+      round.id;
+
+  }
+
+
+  // -------------------------------------------------------
+  // Update game round
+  // -------------------------------------------------------
+
+  const {
+    data: roundRows,
+    error: roundError
+  } = await window.supabaseClient
+    .from("game_rounds")
+    .update({
+
+      status:
+        "playing",
+
+      started_at:
+        new Date().toISOString()
+
+    })
+    .eq(
+      "id",
+      room.current_round_id
+    )
+    .select()
+    .limit(1);
+
+  if (roundError) {
+    throw roundError;
+  }
+
+  if (
+    !roundRows ||
+    roundRows.length === 0
+  ) {
+
+    throw new Error(
+      "Could not activate the game round."
+    );
+
+  }
+
+
+  // -------------------------------------------------------
+  // Update room
   // -------------------------------------------------------
 
   const {
@@ -787,32 +992,36 @@ async function markRoomPlaying(
   } = await window.supabaseClient
     .from("game_rooms")
     .update({
-      status: "playing",
+
+      status:
+        "playing",
+
       started_at:
-        new Date().toISOString()
+        new Date().toISOString(),
+
+      current_round_id:
+        room.current_round_id
+
     })
-    .eq("id", roomId)
-    .eq("host_id", user.id)
-    .eq("status", "starting")
+    .eq(
+      "id",
+      roomId
+    )
+    .eq(
+      "host_id",
+      user.id
+    )
+    .eq(
+      "status",
+      "starting"
+    )
     .select()
     .limit(1);
 
-
   if (error) {
-
-    console.error(
-      "Mark room playing error:",
-      error
-    );
-
     throw error;
-
   }
 
-
-  // -------------------------------------------------------
-  // Another request may have already changed it.
-  // -------------------------------------------------------
 
   if (
     !updatedRooms ||
@@ -820,36 +1029,31 @@ async function markRoomPlaying(
   ) {
 
     const {
-      data: latestRooms,
-      error: latestError
+      data: latestRooms
     } = await window.supabaseClient
       .from("game_rooms")
       .select(`
         id,
         host_id,
-        status
+        status,
+        current_round_id,
+        started_at
       `)
-      .eq("id", roomId)
+      .eq(
+        "id",
+        roomId
+      )
       .limit(1);
-
-
-    if (latestError) {
-      throw latestError;
-    }
-
 
     const latestRoom =
       latestRooms?.[0];
 
-
     if (
-      latestRoom?.status === "playing"
+      latestRoom?.status ===
+      "playing"
     ) {
-
       return latestRoom;
-
     }
-
 
     throw new Error(
       "Could not start the game."
@@ -859,7 +1063,7 @@ async function markRoomPlaying(
 
 
   console.log(
-    "Room changed to PLAYING:",
+    "ROOM IS NOW PLAYING:",
     updatedRooms[0]
   );
 

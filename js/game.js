@@ -1,499 +1,2938 @@
 /**
  * js/game.js
  * ---------------------------------------------------------
- * Main game loop: movement, bomb lifecycle, elimination/respawn,
- * live score tracking, and the round timer that ends the round
- * and hands off to results.html.
+ * Main game loop:
+ * - Loads the active room/round
+ * - Player movement
+ * - Bomb lifecycle
+ * - Elimination / respawn
+ * - Live score tracking
+ * - Round timer
+ * - Results handoff
  * ---------------------------------------------------------
  */
 
 let canvas, ctx;
 let logicalWidth = 0, logicalHeight = 0;
-let currentUser, currentProfile;
-let room, arena, roundId;
-let myPlayer;
+
+let currentUser = null;
+let currentProfile = null;
+
+let room = null;
+let arena = null;
+let roundId = null;
+
+let myPlayer = null;
 let otherPlayers = {};
+
 let gameChannel = null;
 let joystickState = null;
+
 let lastFrameTime = 0;
 let lastBroadcastTime = 0;
+
 const BROADCAST_INTERVAL_MS = 80;
 
 let isHost = false;
+
 let bombs = {};
 let explosions = [];
+
 let myCarriedBombId = null;
 let bombSpawnTimer = null;
 
 let roundEndsAtMs = 0;
 let roundEnded = false;
+
 let timerDisplayInterval = null;
+
 let chatChannel = null;
 let chatMounted = false;
 
-const myScore = { kills: 0, deaths: 0, bombsPickedUp: 0, bombsThrown: 0, hits: 0 };
+const myScore = {
+  kills: 0,
+  deaths: 0,
+  bombsPickedUp: 0,
+  bombsThrown: 0,
+  hits: 0
+};
+
+
+// =========================================================
+// GAME INITIALIZATION
+// =========================================================
 
 async function initGame() {
-  currentUser = await requireAuth();
-  if (!currentUser) return;
 
-  const { data: profile } = await window.supabaseClient
-    .from("profiles").select("username").eq("id", currentUser.id).single();
-  currentProfile = profile;
+  try {
 
-  const params = new URLSearchParams(window.location.search);
-  const code = (params.get("code") || "").toUpperCase();
-  if (!code) { window.location.href = "index.html"; return; }
+    console.log("=================================");
+    console.log("BOMB ARENA - INITIALIZING GAME");
+    console.log("=================================");
 
-  room = await getRoomByCode(code);
-  if (!room) { window.location.href = "index.html"; return; }
-  if (!room.current_round_id) { alert("This room has no active round."); window.location.href = "index.html"; return; }
 
-  roundId = room.current_round_id;
-  arena = getArena(room.map);
-  isHost = room.host_id === currentUser.id;
+    // -----------------------------------------------------
+    // Authentication
+    // -----------------------------------------------------
 
-  roundEndsAtMs = new Date(room.started_at).getTime() + room.round_duration_seconds * 1000;
+    currentUser = await requireAuth();
 
-  document.getElementById("roomCodeLabel").textContent = room.room_code;
-  document.getElementById("mapLabel").textContent = arena.name;
+    if (!currentUser) {
+      console.error("No authenticated user.");
+      return;
+    }
 
-  await ensurePlayerScoreRow(roundId, currentUser.id);
+    console.log(
+      "Logged in user:",
+      currentUser.id
+    );
 
-  canvas = document.getElementById("gameCanvas");
-  ctx = canvas.getContext("2d");
-  resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
 
-  joystickState = createJoystick("joystickZone");
-  initKeyboardControls();
+    // -----------------------------------------------------
+    // Load profile
+    // -----------------------------------------------------
 
-  await setupPlayers();
-  setupChannel();
-  setupActionButtons();
-  setupChatToggle();
-  startTimerDisplay();
+    const {
+      data: profiles,
+      error: profileError
+    } = await window.supabaseClient
+      .from("profiles")
+      .select("username")
+      .eq("id", currentUser.id)
+      .limit(1);
 
-  requestAnimationFrame(loop);
+    if (profileError) {
+
+      console.error(
+        "Profile loading error:",
+        profileError
+      );
+
+      throw profileError;
+    }
+
+    currentProfile =
+      profiles?.[0] || {
+        username: "Player"
+      };
+
+
+    // -----------------------------------------------------
+    // Get room code from URL
+    // -----------------------------------------------------
+
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
+
+    const code =
+      (params.get("code") || "")
+        .trim()
+        .toUpperCase();
+
+    if (!code) {
+
+      console.error(
+        "No room code in URL."
+      );
+
+      alert(
+        "No game room was specified."
+      );
+
+      window.location.href =
+        "index.html";
+
+      return;
+    }
+
+    console.log(
+      "Room code:",
+      code
+    );
+
+
+    // -----------------------------------------------------
+    // Load room
+    // -----------------------------------------------------
+
+    room =
+      await getRoomByCode(code);
+
+    if (!room) {
+
+      console.error(
+        "Room not found:",
+        code
+      );
+
+      alert(
+        "Game room not found."
+      );
+
+      window.location.href =
+        "index.html";
+
+      return;
+    }
+
+    console.log(
+      "Loaded room:",
+      room
+    );
+
+
+    // -----------------------------------------------------
+    // Verify room is playing
+    // -----------------------------------------------------
+
+    if (
+      room.status !== "playing"
+    ) {
+
+      console.warn(
+        "Room is not playing. Current status:",
+        room.status
+      );
+
+      alert(
+        `This room is not currently playing. Status: ${room.status}`
+      );
+
+      window.location.href =
+        "lobby.html?code=" +
+        encodeURIComponent(
+          room.room_code
+        );
+
+      return;
+    }
+
+
+    // -----------------------------------------------------
+    // Verify active round
+    // -----------------------------------------------------
+
+    if (
+      !room.current_round_id
+    ) {
+
+      console.error(
+        "Room has no current_round_id:",
+        room
+      );
+
+      alert(
+        "This game room does not have an active round."
+      );
+
+      window.location.href =
+        "index.html";
+
+      return;
+    }
+
+    roundId =
+      room.current_round_id;
+
+    console.log(
+      "Active round:",
+      roundId
+    );
+
+
+    // -----------------------------------------------------
+    // Get active round
+    // -----------------------------------------------------
+
+    const {
+      data: rounds,
+      error: roundError
+    } = await window.supabaseClient
+      .from("game_rounds")
+      .select("*")
+      .eq(
+        "id",
+        roundId
+      )
+      .limit(1);
+
+    if (roundError) {
+
+      console.error(
+        "Round loading error:",
+        roundError
+      );
+
+      throw roundError;
+    }
+
+    if (
+      !rounds ||
+      rounds.length === 0
+    ) {
+
+      console.error(
+        "Round does not exist:",
+        roundId
+      );
+
+      alert(
+        "The active game round could not be found."
+      );
+
+      window.location.href =
+        "index.html";
+
+      return;
+    }
+
+    const round =
+      rounds[0];
+
+    console.log(
+      "Active round data:",
+      round
+    );
+
+
+    // -----------------------------------------------------
+    // Verify round status
+    // -----------------------------------------------------
+
+    if (
+      round.status !== "playing"
+    ) {
+
+      console.warn(
+        "Round is not playing:",
+        round.status
+      );
+
+      alert(
+        `The game round is not active. Status: ${round.status}`
+      );
+
+      window.location.href =
+        "lobby.html?code=" +
+        encodeURIComponent(
+          room.room_code
+        );
+
+      return;
+    }
+
+
+    // -----------------------------------------------------
+    // Load arena
+    // -----------------------------------------------------
+
+    arena =
+      getArena(room.map);
+
+    if (!arena) {
+
+      throw new Error(
+        "Could not load the selected arena."
+      );
+    }
+
+
+    // -----------------------------------------------------
+    // Host check
+    // -----------------------------------------------------
+
+    isHost =
+      room.host_id ===
+      currentUser.id;
+
+
+    console.log(
+      "Is host:",
+      isHost
+    );
+
+
+    // -----------------------------------------------------
+    // Determine round start time
+    // -----------------------------------------------------
+
+    const roomStartedAt =
+      room.started_at;
+
+    const roundStartedAt =
+      round.started_at ||
+      roomStartedAt;
+
+    if (!roundStartedAt) {
+
+      throw new Error(
+        "The game round has no start time."
+      );
+    }
+
+
+    // -----------------------------------------------------
+    // Round timer
+    // -----------------------------------------------------
+
+    roundEndsAtMs =
+      new Date(
+        roundStartedAt
+      ).getTime() +
+      Number(
+        room.round_duration_seconds
+      ) * 1000;
+
+
+    // -----------------------------------------------------
+    // HUD
+    // -----------------------------------------------------
+
+    document
+      .getElementById(
+        "roomCodeLabel"
+      )
+      .textContent =
+      room.room_code;
+
+    document
+      .getElementById(
+        "mapLabel"
+      )
+      .textContent =
+      arena.name;
+
+
+    // -----------------------------------------------------
+    // Ensure score row
+    // -----------------------------------------------------
+
+    await ensurePlayerScoreRow(
+      roundId,
+      currentUser.id
+    );
+
+
+    // -----------------------------------------------------
+    // Canvas
+    // -----------------------------------------------------
+
+    canvas =
+      document.getElementById(
+        "gameCanvas"
+      );
+
+    if (!canvas) {
+
+      throw new Error(
+        "Game canvas was not found."
+      );
+    }
+
+    ctx =
+      canvas.getContext("2d");
+
+    resizeCanvas();
+
+    window.addEventListener(
+      "resize",
+      resizeCanvas
+    );
+
+
+    // -----------------------------------------------------
+    // Controls
+    // -----------------------------------------------------
+
+    joystickState =
+      createJoystick(
+        "joystickZone"
+      );
+
+    initKeyboardControls();
+
+
+    // -----------------------------------------------------
+    // Players
+    // -----------------------------------------------------
+
+    await setupPlayers();
+
+
+    if (!myPlayer) {
+
+      throw new Error(
+        "Your player could not be created."
+      );
+    }
+
+
+    // -----------------------------------------------------
+    // Realtime
+    // -----------------------------------------------------
+
+    setupChannel();
+
+
+    // -----------------------------------------------------
+    // Buttons
+    // -----------------------------------------------------
+
+    setupActionButtons();
+
+
+    // -----------------------------------------------------
+    // Chat
+    // -----------------------------------------------------
+
+    setupChatToggle();
+
+
+    // -----------------------------------------------------
+    // Timer
+    // -----------------------------------------------------
+
+    startTimerDisplay();
+
+
+    console.log(
+      "================================="
+    );
+
+    console.log(
+      "BOMB ARENA READY!"
+    );
+
+    console.log(
+      "Round:",
+      roundId
+    );
+
+    console.log(
+      "Map:",
+      arena.name
+    );
+
+    console.log(
+      "================================="
+    );
+
+
+    // -----------------------------------------------------
+    // Start game loop
+    // -----------------------------------------------------
+
+    requestAnimationFrame(
+      loop
+    );
+
+  } catch (error) {
+
+    console.error(
+      "GAME INITIALIZATION ERROR:",
+      error
+    );
+
+    alert(
+      "Could not start the game:\n\n" +
+      (
+        error?.message ||
+        "Unknown error"
+      )
+    );
+
+  }
 }
+
+
+// =========================================================
+// CANVAS
+// =========================================================
 
 function resizeCanvas() {
-  const dpr = window.devicePixelRatio || 1;
-  logicalWidth = window.innerWidth;
-  logicalHeight = window.innerHeight;
-  canvas.width = logicalWidth * dpr;
-  canvas.height = logicalHeight * dpr;
-  canvas.style.width = logicalWidth + "px";
-  canvas.style.height = logicalHeight + "px";
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS-pixel coordinates from here on
+
+  const dpr =
+    window.devicePixelRatio || 1;
+
+  logicalWidth =
+    window.innerWidth;
+
+  logicalHeight =
+    window.innerHeight;
+
+  canvas.width =
+    logicalWidth * dpr;
+
+  canvas.height =
+    logicalHeight * dpr;
+
+  canvas.style.width =
+    logicalWidth + "px";
+
+  canvas.style.height =
+    logicalHeight + "px";
+
+  ctx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
 }
 
+
+// =========================================================
+// SETUP PLAYERS
+// =========================================================
+
 async function setupPlayers() {
-  const players = await fetchRoomPlayers(room.id);
-  players.forEach((p, index) => {
-    const spawn = arena.spawnPoints[index % arena.spawnPoints.length];
-    const playerObj = new Player({
-      userId: p.user_id,
-      username: p.username,
-      character: p.character || { body: "body_1", body_color: "#f1c27d", hair: "bald", hair_color: "#000", shirt: "shirt_1", shirt_color: "#3498db", pants: "pants_1", pants_color: "#2c3e50", shoes: "shoes_1", shoes_color: "#111", accessory: "none" },
-      x: spawn.x, y: spawn.y, color: p.color,
-      isLocal: p.user_id === currentUser.id,
-    });
-    if (p.user_id === currentUser.id) myPlayer = playerObj;
-    else otherPlayers[p.user_id] = playerObj;
-  });
+
+  const players =
+    await fetchRoomPlayers(
+      room.id
+    );
+
+  if (
+    !players ||
+    players.length === 0
+  ) {
+
+    throw new Error(
+      "No players were found in this room."
+    );
+  }
+
+
+  players.forEach(
+    (p, index) => {
+
+      const spawn =
+        arena.spawnPoints[
+          index %
+          arena.spawnPoints.length
+        ];
+
+
+      const playerObj =
+        new Player({
+
+          userId:
+            p.user_id,
+
+          username:
+            p.username ||
+            "Player",
+
+          character:
+            p.character ||
+            {
+              body: "body_1",
+              body_color: "#f1c27d",
+              hair: "hair_1",
+              hair_color: "#2b1b0e",
+              shirt: "shirt_1",
+              shirt_color: "#3498db",
+              pants: "pants_1",
+              pants_color: "#333333",
+              shoes: "shoes_1",
+              shoes_color: "#222222",
+              accessory: "none"
+            },
+
+          x:
+            spawn.x,
+
+          y:
+            spawn.y,
+
+          color:
+            p.color,
+
+          isLocal:
+            p.user_id ===
+            currentUser.id
+
+        });
+
+
+      if (
+        p.user_id ===
+        currentUser.id
+      ) {
+
+        myPlayer =
+          playerObj;
+
+      } else {
+
+        otherPlayers[
+          p.user_id
+        ] =
+          playerObj;
+
+      }
+
+    }
+  );
 }
+
 
 // =========================================================
 // REALTIME CHANNEL
 // =========================================================
+
 function setupChannel() {
-  gameChannel = window.supabaseClient.channel(`game:${room.id}`, {
-    config: { presence: { key: currentUser.id } },
-  });
+
+  gameChannel =
+    window.supabaseClient.channel(
+      `game:${room.id}`,
+      {
+        config: {
+          presence: {
+            key:
+              currentUser.id
+          }
+        }
+      }
+    );
+
 
   gameChannel
-    .on("broadcast", { event: "move" }, ({ payload }) => {
-      if (payload.userId === currentUser.id) return;
-      const p = otherPlayers[payload.userId];
-      if (p) { p.applyNetworkUpdate(payload); p.hasShield = payload.hasShield; }
-    })
-    .on("broadcast", { event: "bomb_spawn" }, ({ payload }) => applyBombSpawn(payload))
-    .on("broadcast", { event: "bomb_state" }, ({ payload }) => applyBombState(payload))
-    .on("broadcast", { event: "bomb_remove" }, ({ payload }) => { delete bombs[payload.bombId]; })
-    .on("broadcast", { event: "player_eliminated" }, ({ payload }) => handleEliminationBroadcast(payload))
-    .on("broadcast", { event: "player_respawn" }, ({ payload }) => handleRespawnBroadcast(payload))
-    .on("broadcast", { event: "bomb_pickup_request" }, ({ payload }) => { if (isHost) hostHandlePickupRequest(payload); })
-    .on("broadcast", { event: "bomb_throw_request" }, ({ payload }) => { if (isHost) hostHandleThrowRequest(payload); })
-    .subscribe(async (status) => {
-      updateConnectionBanner(status);
-      if (status === "SUBSCRIBED") {
-        await gameChannel.track({ user_id: currentUser.id });
-        broadcastPosition(true);
-        if (isHost && !roundEnded) startBombSpawnLoop();
+
+    // -----------------------------------------------------
+    // Movement
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "move"
+      },
+      ({ payload }) => {
+
+        if (
+          payload.userId ===
+          currentUser.id
+        ) {
+          return;
+        }
+
+        const p =
+          otherPlayers[
+            payload.userId
+          ];
+
+        if (p) {
+
+          p.applyNetworkUpdate(
+            payload
+          );
+
+          p.hasShield =
+            payload.hasShield;
+
+        }
+
       }
-    });
+    )
+
+
+    // -----------------------------------------------------
+    // Bomb spawn
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "bomb_spawn"
+      },
+      ({ payload }) => {
+
+        applyBombSpawn(
+          payload
+        );
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Bomb state
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "bomb_state"
+      },
+      ({ payload }) => {
+
+        applyBombState(
+          payload
+        );
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Bomb remove
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "bomb_remove"
+      },
+      ({ payload }) => {
+
+        delete bombs[
+          payload.bombId
+        ];
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Player eliminated
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "player_eliminated"
+      },
+      ({ payload }) => {
+
+        handleEliminationBroadcast(
+          payload
+        );
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Player respawn
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "player_respawn"
+      },
+      ({ payload }) => {
+
+        handleRespawnBroadcast(
+          payload
+        );
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Bomb pickup
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "bomb_pickup_request"
+      },
+      ({ payload }) => {
+
+        if (isHost) {
+
+          hostHandlePickupRequest(
+            payload
+          );
+
+        }
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Bomb throw
+    // -----------------------------------------------------
+
+    .on(
+      "broadcast",
+      {
+        event: "bomb_throw_request"
+      },
+      ({ payload }) => {
+
+        if (isHost) {
+
+          hostHandleThrowRequest(
+            payload
+          );
+
+        }
+
+      }
+    )
+
+
+    // -----------------------------------------------------
+    // Subscribe
+    // -----------------------------------------------------
+
+    .subscribe(
+      async (status) => {
+
+        console.log(
+          "Game realtime status:",
+          status
+        );
+
+        updateConnectionBanner(
+          status
+        );
+
+
+        if (
+          status ===
+          "SUBSCRIBED"
+        ) {
+
+          await gameChannel.track({
+            user_id:
+              currentUser.id
+          });
+
+
+          broadcastPosition(
+            true
+          );
+
+
+          if (
+            isHost &&
+            !roundEnded
+          ) {
+
+            startBombSpawnLoop();
+
+          }
+
+        }
+
+      }
+    );
 }
 
-function broadcastPosition(force) {
-  const now = performance.now();
-  if (!force && now - lastBroadcastTime < BROADCAST_INTERVAL_MS) return;
-  lastBroadcastTime = now;
+
+// =========================================================
+// POSITION BROADCAST
+// =========================================================
+
+function broadcastPosition(
+  force = false
+) {
+
+  if (
+    !gameChannel ||
+    !myPlayer
+  ) {
+    return;
+  }
+
+  const now =
+    performance.now();
+
+  if (
+    !force &&
+    now -
+      lastBroadcastTime <
+      BROADCAST_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  lastBroadcastTime =
+    now;
+
 
   gameChannel.send({
-    type: "broadcast",
-    event: "move",
+
+    type:
+      "broadcast",
+
+    event:
+      "move",
+
     payload: {
-      userId: currentUser.id, x: myPlayer.x, y: myPlayer.y,
-      facing: myPlayer.facing, isMoving: myPlayer.isMoving, hasShield: myPlayer.hasShield,
-    },
+
+      userId:
+        currentUser.id,
+
+      x:
+        myPlayer.x,
+
+      y:
+        myPlayer.y,
+
+      facing:
+        myPlayer.facing,
+
+      isMoving:
+        myPlayer.isMoving,
+
+      hasShield:
+        myPlayer.hasShield
+
+    }
+
   });
 }
 
+
 // =========================================================
-// BOMB LIFECYCLE (host-authoritative)
+// BOMB LIFECYCLE
 // =========================================================
+
 function startBombSpawnLoop() {
-  bombSpawnTimer = setInterval(() => {
-    if (roundEnded) return;
-    if (Object.keys(bombs).length >= MAX_CONCURRENT_BOMBS) return;
 
-    const playerPositions = [myPlayer, ...Object.values(otherPlayers)].map((p) => ({ x: p.x, y: p.y }));
-    const spot = findSafeBombSpawn(room.map, playerPositions);
-    const bomb = { id: generateBombId(), x: spot.x, y: spot.y, state: "idle" };
+  if (bombSpawnTimer) {
+    clearInterval(
+      bombSpawnTimer
+    );
+  }
 
-    applyBombSpawn(bomb);
-    gameChannel.send({ type: "broadcast", event: "bomb_spawn", payload: bomb });
-  }, BOMB_SPAWN_INTERVAL_MS);
+
+  bombSpawnTimer =
+    setInterval(
+      () => {
+
+        if (
+          roundEnded ||
+          !myPlayer
+        ) {
+          return;
+        }
+
+        if (
+          Object.keys(
+            bombs
+          ).length >=
+          MAX_CONCURRENT_BOMBS
+        ) {
+          return;
+        }
+
+
+        const playerPositions =
+          [
+            myPlayer,
+            ...Object.values(
+              otherPlayers
+            )
+          ]
+            .filter(Boolean)
+            .map(
+              p => ({
+                x: p.x,
+                y: p.y
+              })
+            );
+
+
+        const spot =
+          findSafeBombSpawn(
+            room.map,
+            playerPositions
+          );
+
+
+        const bomb = {
+
+          id:
+            generateBombId(),
+
+          x:
+            spot.x,
+
+          y:
+            spot.y,
+
+          state:
+            "idle"
+
+        };
+
+
+        applyBombSpawn(
+          bomb
+        );
+
+
+        gameChannel.send({
+
+          type:
+            "broadcast",
+
+          event:
+            "bomb_spawn",
+
+          payload:
+            bomb
+
+        });
+
+      },
+
+      BOMB_SPAWN_INTERVAL_MS
+    );
 }
 
-function applyBombSpawn(bomb) { bombs[bomb.id] = { ...bomb }; }
 
-function applyBombState(payload) {
-  const bomb = bombs[payload.bombId];
-  if (!bomb) return;
-  Object.assign(bomb, payload.changes);
-  if (payload.changes.state === "exploding") {
-    explosions.push({ x: bomb.x, y: bomb.y, startTime: performance.now() });
-    playSound("explosion");
+function applyBombSpawn(
+  bomb
+) {
+
+  if (!bomb?.id) {
+    return;
+  }
+
+  bombs[
+    bomb.id
+  ] = {
+    ...bomb
+  };
+}
+
+
+function applyBombState(
+  payload
+) {
+
+  if (
+    !payload?.bombId
+  ) {
+    return;
+  }
+
+  const bomb =
+    bombs[
+      payload.bombId
+    ];
+
+  if (!bomb) {
+    return;
+  }
+
+
+  Object.assign(
+    bomb,
+    payload.changes
+  );
+
+
+  if (
+    payload.changes?.state ===
+    "exploding"
+  ) {
+
+    explosions.push({
+
+      x:
+        bomb.x,
+
+      y:
+        bomb.y,
+
+      startTime:
+        performance.now()
+
+    });
+
+
+    playSound(
+      "explosion"
+    );
+
   }
 }
 
-function requestPickup(bombId) {
-  if (roundEnded) return;
-  playSound("pickup");
+
+// =========================================================
+// PICKUP
+// =========================================================
+
+function requestPickup(
+  bombId
+) {
+
+  if (
+    roundEnded ||
+    !bombId
+  ) {
+    return;
+  }
+
+
+  playSound(
+    "pickup"
+  );
+
+
   myScore.bombsPickedUp++;
-  pushMyScore(roundId, currentUser.id, myScore);
 
-  const payload = { bombId, userId: currentUser.id };
-  if (isHost) hostHandlePickupRequest(payload);
-  else gameChannel.send({ type: "broadcast", event: "bomb_pickup_request", payload });
+
+  pushMyScore(
+    roundId,
+    currentUser.id,
+    myScore
+  );
+
+
+  const payload = {
+
+    bombId,
+
+    userId:
+      currentUser.id
+
+  };
+
+
+  if (isHost) {
+
+    hostHandlePickupRequest(
+      payload
+    );
+
+  } else {
+
+    gameChannel.send({
+
+      type:
+        "broadcast",
+
+      event:
+        "bomb_pickup_request",
+
+      payload
+
+    });
+
+  }
 }
 
-function requestThrow(bombId) {
-  if (roundEnded) return;
-  playSound("throw");
+
+// =========================================================
+// THROW
+// =========================================================
+
+function requestThrow(
+  bombId
+) {
+
+  if (
+    roundEnded ||
+    !bombId
+  ) {
+    return;
+  }
+
+
+  playSound(
+    "throw"
+  );
+
+
   myScore.bombsThrown++;
-  pushMyScore(roundId, currentUser.id, myScore);
 
-  const payload = { bombId, userId: currentUser.id, facing: myPlayer.facing, fromX: myPlayer.x, fromY: myPlayer.y };
-  if (isHost) hostHandleThrowRequest(payload);
-  else gameChannel.send({ type: "broadcast", event: "bomb_throw_request", payload });
+
+  pushMyScore(
+    roundId,
+    currentUser.id,
+    myScore
+  );
+
+
+  const payload = {
+
+    bombId,
+
+    userId:
+      currentUser.id,
+
+    facing:
+      myPlayer.facing,
+
+    fromX:
+      myPlayer.x,
+
+    fromY:
+      myPlayer.y
+
+  };
+
+
+  if (isHost) {
+
+    hostHandleThrowRequest(
+      payload
+    );
+
+  } else {
+
+    gameChannel.send({
+
+      type:
+        "broadcast",
+
+      event:
+        "bomb_throw_request",
+
+      payload
+
+    });
+
+  }
 }
 
-function hostHandlePickupRequest({ bombId, userId }) {
-  const bomb = bombs[bombId];
-  if (!bomb || bomb.state !== "idle") return;
-  const changes = { state: "carried", carriedBy: userId };
-  applyBombState({ bombId, changes });
-  gameChannel.send({ type: "broadcast", event: "bomb_state", payload: { bombId, changes } });
-  if (userId === currentUser.id) myCarriedBombId = bombId;
+
+// =========================================================
+// HOST PICKUP
+// =========================================================
+
+function hostHandlePickupRequest({
+  bombId,
+  userId
+}) {
+
+  const bomb =
+    bombs[bombId];
+
+  if (
+    !bomb ||
+    bomb.state !==
+      "idle"
+  ) {
+    return;
+  }
+
+
+  const changes = {
+
+    state:
+      "carried",
+
+    carriedBy:
+      userId
+
+  };
+
+
+  applyBombState({
+
+    bombId,
+
+    changes
+
+  });
+
+
+  gameChannel.send({
+
+    type:
+      "broadcast",
+
+    event:
+      "bomb_state",
+
+    payload: {
+
+      bombId,
+
+      changes
+
+    }
+
+  });
+
+
+  if (
+    userId ===
+    currentUser.id
+  ) {
+
+    myCarriedBombId =
+      bombId;
+
+  }
 }
 
-function hostHandleThrowRequest({ bombId, userId, facing, fromX, fromY }) {
-  const bomb = bombs[bombId];
-  if (!bomb || bomb.state !== "carried" || bomb.carriedBy !== userId) return;
 
-  const target = computeThrowTarget(fromX, fromY, facing, arena.obstacles);
-  const travelMs = (target.distance / THROW_SPEED_PX_PER_SEC) * 1000;
-  const changes = { state: "thrown", thrownBy: userId, x: fromX, y: fromY, targetX: target.x, targetY: target.y, startTime: performance.now(), travelMs };
+// =========================================================
+// HOST THROW
+// =========================================================
 
-  applyBombState({ bombId, changes });
-  gameChannel.send({ type: "broadcast", event: "bomb_state", payload: { bombId, changes } });
-  if (userId === currentUser.id) myCarriedBombId = null;
+function hostHandleThrowRequest({
+  bombId,
+  userId,
+  facing,
+  fromX,
+  fromY
+}) {
 
-  setTimeout(() => hostResolveExplosion(bombId), travelMs);
+  const bomb =
+    bombs[bombId];
+
+  if (
+    !bomb ||
+    bomb.state !==
+      "carried" ||
+    bomb.carriedBy !==
+      userId
+  ) {
+    return;
+  }
+
+
+  const target =
+    computeThrowTarget(
+      fromX,
+      fromY,
+      facing,
+      arena.obstacles
+    );
+
+
+  const travelMs =
+    (
+      target.distance /
+      THROW_SPEED_PX_PER_SEC
+    ) * 1000;
+
+
+  const changes = {
+
+    state:
+      "thrown",
+
+    thrownBy:
+      userId,
+
+    x:
+      fromX,
+
+    y:
+      fromY,
+
+    targetX:
+      target.x,
+
+    targetY:
+      target.y,
+
+    startTime:
+      performance.now(),
+
+    travelMs
+
+  };
+
+
+  applyBombState({
+
+    bombId,
+
+    changes
+
+  });
+
+
+  gameChannel.send({
+
+    type:
+      "broadcast",
+
+    event:
+      "bomb_state",
+
+    payload: {
+
+      bombId,
+
+      changes
+
+    }
+
+  });
+
+
+  if (
+    userId ===
+    currentUser.id
+  ) {
+
+    myCarriedBombId =
+      null;
+
+  }
+
+
+  setTimeout(
+    () =>
+      hostResolveExplosion(
+        bombId
+      ),
+    travelMs
+  );
 }
 
-function hostResolveExplosion(bombId) {
-  const bomb = bombs[bombId];
-  if (!bomb || bomb.state !== "thrown") return;
 
-  const explodeChanges = { state: "exploding", x: bomb.targetX, y: bomb.targetY };
-  applyBombState({ bombId, changes: explodeChanges });
-  gameChannel.send({ type: "broadcast", event: "bomb_state", payload: { bombId, changes: explodeChanges } });
+// =========================================================
+// HOST EXPLOSION
+// =========================================================
+
+function hostResolveExplosion(
+  bombId
+) {
+
+  const bomb =
+    bombs[bombId];
+
+  if (
+    !bomb ||
+    bomb.state !==
+      "thrown"
+  ) {
+    return;
+  }
+
+
+  const explodeChanges = {
+
+    state:
+      "exploding",
+
+    x:
+      bomb.targetX,
+
+    y:
+      bomb.targetY
+
+  };
+
+
+  applyBombState({
+
+    bombId,
+
+    changes:
+      explodeChanges
+
+  });
+
+
+  gameChannel.send({
+
+    type:
+      "broadcast",
+
+    event:
+      "bomb_state",
+
+    payload: {
+
+      bombId,
+
+      changes:
+        explodeChanges
+
+    }
+
+  });
+
 
   if (!roundEnded) {
-    const allPlayers = { [currentUser.id]: myPlayer, ...otherPlayers };
-    Object.entries(allPlayers).forEach(([userId, p]) => {
-      if (p.eliminated || p.hasShield) return;
-      const dist = Math.hypot(p.x - bomb.targetX, p.y - bomb.targetY);
-      if (dist <= EXPLOSION_RADIUS_PX) {
-        const elimPayload = { targetUserId: userId, attackerUserId: bomb.thrownBy };
-        handleEliminationBroadcast(elimPayload);
-        gameChannel.send({ type: "broadcast", event: "player_eliminated", payload: elimPayload });
+
+    const allPlayers = {
+
+      [currentUser.id]:
+        myPlayer,
+
+      ...otherPlayers
+
+    };
+
+
+    Object.entries(
+      allPlayers
+    ).forEach(
+      ([userId, p]) => {
+
+        if (
+          !p ||
+          p.eliminated ||
+          p.hasShield
+        ) {
+          return;
+        }
+
+
+        const dist =
+          Math.hypot(
+            p.x -
+              bomb.targetX,
+
+            p.y -
+              bomb.targetY
+          );
+
+
+        if (
+          dist <=
+          EXPLOSION_RADIUS_PX
+        ) {
+
+          const elimPayload = {
+
+            targetUserId:
+              userId,
+
+            attackerUserId:
+              bomb.thrownBy
+
+          };
+
+
+          handleEliminationBroadcast(
+            elimPayload
+          );
+
+
+          gameChannel.send({
+
+            type:
+              "broadcast",
+
+            event:
+              "player_eliminated",
+
+            payload:
+              elimPayload
+
+          });
+
+        }
+
       }
-    });
+    );
+
   }
 
-  setTimeout(() => {
-    delete bombs[bombId];
-    gameChannel.send({ type: "broadcast", event: "bomb_remove", payload: { bombId } });
-  }, 550);
+
+  setTimeout(
+    () => {
+
+      delete bombs[
+        bombId
+      ];
+
+
+      gameChannel.send({
+
+        type:
+          "broadcast",
+
+        event:
+          "bomb_remove",
+
+        payload: {
+          bombId
+        }
+
+      });
+
+    },
+
+    550
+  );
 }
 
+
 // =========================================================
-// ELIMINATION + RESPAWN + SCORING
+// ELIMINATION
 // =========================================================
-function handleEliminationBroadcast({ targetUserId, attackerUserId }) {
-  // Credit the attacker's kill (runs on every client, but only
-  // the matching one's `currentUser.id` check actually applies it)
-  if (attackerUserId === currentUser.id && attackerUserId !== targetUserId) {
+
+function handleEliminationBroadcast({
+  targetUserId,
+  attackerUserId
+}) {
+
+  // -------------------------------------------------------
+  // Kill credit
+  // -------------------------------------------------------
+
+  if (
+    attackerUserId ===
+      currentUser.id &&
+    attackerUserId !==
+      targetUserId
+  ) {
+
     myScore.kills++;
     myScore.hits++;
-    pushMyScore(roundId, currentUser.id, myScore);
+
+
+    pushMyScore(
+      roundId,
+      currentUser.id,
+      myScore
+    );
+
   }
 
-  if (targetUserId === currentUser.id) {
-    if (myPlayer.eliminated) return;
-    myPlayer.eliminated = true;
-    myPlayer.hasShield = false;
-    myCarriedBombId = null;
-    playSound("eliminate");
+
+  // -------------------------------------------------------
+  // Local player eliminated
+  // -------------------------------------------------------
+
+  if (
+    targetUserId ===
+    currentUser.id
+  ) {
+
+    if (
+      myPlayer.eliminated
+    ) {
+      return;
+    }
+
+
+    myPlayer.eliminated =
+      true;
+
+    myPlayer.hasShield =
+      false;
+
+    myCarriedBombId =
+      null;
+
+
+    playSound(
+      "eliminate"
+    );
+
 
     myScore.deaths++;
-    pushMyScore(roundId, currentUser.id, myScore);
+
+
+    pushMyScore(
+      roundId,
+      currentUser.id,
+      myScore
+    );
+
 
     if (!roundEnded) {
+
       runRespawnCountdown(
-        { overlay: document.getElementById("eliminationOverlay"), title: document.getElementById("elimTitle"), number: document.getElementById("elimNumber") },
-        () => respawnLocalPlayer()
+
+        {
+          overlay:
+            document.getElementById(
+              "eliminationOverlay"
+            ),
+
+          title:
+            document.getElementById(
+              "elimTitle"
+            ),
+
+          number:
+            document.getElementById(
+              "elimNumber"
+            )
+        },
+
+        () =>
+          respawnLocalPlayer()
+
       );
+
     }
+
+
   } else {
-    const p = otherPlayers[targetUserId];
-    if (p) p.eliminated = true;
+
+    const p =
+      otherPlayers[
+        targetUserId
+      ];
+
+    if (p) {
+      p.eliminated =
+        true;
+    }
+
   }
 }
 
+
+// =========================================================
+// RESPAWN
+// =========================================================
+
 function respawnLocalPlayer() {
-  if (roundEnded) return;
-  playSound("respawn");
-  const spawn = getRandomSafeSpawnPoint(arena);
-  myPlayer.x = spawn.x; myPlayer.y = spawn.y;
-  myPlayer.eliminated = false;
-  myPlayer.hasShield = true;
 
-  broadcastPosition(true);
-  gameChannel.send({ type: "broadcast", event: "player_respawn", payload: { userId: currentUser.id, x: spawn.x, y: spawn.y } });
+  if (
+    roundEnded ||
+    !myPlayer
+  ) {
+    return;
+  }
 
-  setTimeout(() => { myPlayer.hasShield = false; }, SHIELD_DURATION_MS);
+
+  playSound(
+    "respawn"
+  );
+
+
+  const spawn =
+    getRandomSafeSpawnPoint(
+      arena
+    );
+
+
+  myPlayer.x =
+    spawn.x;
+
+  myPlayer.y =
+    spawn.y;
+
+  myPlayer.eliminated =
+    false;
+
+  myPlayer.hasShield =
+    true;
+
+
+  broadcastPosition(
+    true
+  );
+
+
+  gameChannel.send({
+
+    type:
+      "broadcast",
+
+    event:
+      "player_respawn",
+
+    payload: {
+
+      userId:
+        currentUser.id,
+
+      x:
+        spawn.x,
+
+      y:
+        spawn.y
+
+    }
+
+  });
+
+
+  setTimeout(
+    () => {
+
+      if (
+        myPlayer &&
+        !myPlayer.eliminated
+      ) {
+        myPlayer.hasShield =
+          false;
+      }
+
+    },
+
+    SHIELD_DURATION_MS
+  );
 }
 
-function handleRespawnBroadcast({ userId, x, y }) {
-  const p = otherPlayers[userId];
-  if (!p) return;
-  p.eliminated = false; p.hasShield = true;
-  p.x = p.targetX = x; p.y = p.targetY = y;
-  setTimeout(() => { p.hasShield = false; }, SHIELD_DURATION_MS);
+
+function handleRespawnBroadcast({
+  userId,
+  x,
+  y
+}) {
+
+  const p =
+    otherPlayers[
+      userId
+    ];
+
+  if (!p) {
+    return;
+  }
+
+
+  p.eliminated =
+    false;
+
+  p.hasShield =
+    true;
+
+  p.x =
+    p.targetX =
+    x;
+
+  p.y =
+    p.targetY =
+    y;
+
+
+  setTimeout(
+    () => {
+
+      if (p) {
+        p.hasShield =
+          false;
+      }
+
+    },
+
+    SHIELD_DURATION_MS
+  );
 }
+
 
 // =========================================================
 // ACTION BUTTONS
 // =========================================================
-function setupActionButtons() {
-  const pickupBtn = document.getElementById("pickupBtn");
-  const throwBtn = document.getElementById("throwBtn");
 
-  pickupBtn.addEventListener("click", () => {
-    const nearest = findNearestIdleBomb();
-    if (nearest) requestPickup(nearest.id);
-  });
-  throwBtn.addEventListener("click", () => {
-    if (myCarriedBombId) requestThrow(myCarriedBombId);
-  });
+function setupActionButtons() {
+
+  const pickupBtn =
+    document.getElementById(
+      "pickupBtn"
+    );
+
+  const throwBtn =
+    document.getElementById(
+      "throwBtn"
+    );
+
+
+  pickupBtn.addEventListener(
+    "click",
+    () => {
+
+      const nearest =
+        findNearestIdleBomb();
+
+      if (nearest) {
+
+        requestPickup(
+          nearest.id
+        );
+
+      }
+
+    }
+  );
+
+
+  throwBtn.addEventListener(
+    "click",
+    () => {
+
+      if (
+        myCarriedBombId
+      ) {
+
+        requestThrow(
+          myCarriedBombId
+        );
+
+      }
+
+    }
+  );
 }
 
+
+// =========================================================
+// FIND NEAREST BOMB
+// =========================================================
+
 function findNearestIdleBomb() {
-  if (myCarriedBombId || myPlayer.eliminated || roundEnded) return null;
-  let nearest = null, nearestDist = Infinity;
-  Object.values(bombs).forEach((b) => {
-    if (b.state !== "idle") return;
-    const dist = Math.hypot(b.x - myPlayer.x, b.y - myPlayer.y);
-    if (dist < PICKUP_RADIUS_PX && dist < nearestDist) { nearest = b; nearestDist = dist; }
-  });
+
+  if (
+    myCarriedBombId ||
+    myPlayer?.eliminated ||
+    roundEnded
+  ) {
+    return null;
+  }
+
+
+  let nearest = null;
+  let nearestDist =
+    Infinity;
+
+
+  Object.values(
+    bombs
+  ).forEach(
+    b => {
+
+      if (
+        b.state !==
+        "idle"
+      ) {
+        return;
+      }
+
+
+      const dist =
+        Math.hypot(
+          b.x -
+            myPlayer.x,
+
+          b.y -
+            myPlayer.y
+        );
+
+
+      if (
+        dist <
+          PICKUP_RADIUS_PX &&
+        dist <
+          nearestDist
+      ) {
+
+        nearest =
+          b;
+
+        nearestDist =
+          dist;
+
+      }
+
+    }
+  );
+
+
   return nearest;
 }
 
+
+// =========================================================
+// ACTION BUTTON UI
+// =========================================================
+
 function updateActionButtonsUI() {
-  const pickupBtn = document.getElementById("pickupBtn");
-  const throwBtn = document.getElementById("throwBtn");
-  const bombReadyHud = document.getElementById("bombReadyHud");
 
-  pickupBtn.style.opacity = findNearestIdleBomb() ? "1" : "0.4";
-  const canThrow = !!myCarriedBombId && !roundEnded;
-  throwBtn.style.opacity = canThrow ? "1" : "0.4";
-  bombReadyHud.classList.toggle("hidden", !canThrow);
+  const pickupBtn =
+    document.getElementById(
+      "pickupBtn"
+    );
+
+  const throwBtn =
+    document.getElementById(
+      "throwBtn"
+    );
+
+  const bombReadyHud =
+    document.getElementById(
+      "bombReadyHud"
+    );
+
+
+  if (
+    !pickupBtn ||
+    !throwBtn ||
+    !bombReadyHud
+  ) {
+    return;
+  }
+
+
+  const nearest =
+    findNearestIdleBomb();
+
+
+  pickupBtn.style.opacity =
+    nearest
+      ? "1"
+      : "0.4";
+
+
+  const canThrow =
+    !!myCarriedBombId &&
+    !roundEnded &&
+    !myPlayer?.eliminated;
+
+
+  throwBtn.style.opacity =
+    canThrow
+      ? "1"
+      : "0.4";
+
+
+  bombReadyHud.classList.toggle(
+    "hidden",
+    !canThrow
+  );
 }
 
+
 // =========================================================
-// CHAT OVERLAY (mounted lazily, doesn't pause the game loop)
+// CHAT
 // =========================================================
+
 function setupChatToggle() {
-  const toggleBtn = document.getElementById("chatToggleBtn");
-  const panel = document.getElementById("chatOverlayPanel");
 
-  toggleBtn.addEventListener("click", () => {
-    const opening = panel.classList.contains("hidden");
-    panel.classList.toggle("hidden");
-    if (opening && !chatMounted) {
-      chatMounted = true;
-      chatChannel = mountChatPanel(panel, {
-        roomId: room.id, userId: currentUser.id, username: currentProfile.username,
-      });
+  const toggleBtn =
+    document.getElementById(
+      "chatToggleBtn"
+    );
+
+  const panel =
+    document.getElementById(
+      "chatOverlayPanel"
+    );
+
+
+  if (
+    !toggleBtn ||
+    !panel
+  ) {
+    return;
+  }
+
+
+  toggleBtn.addEventListener(
+    "click",
+    () => {
+
+      const opening =
+        panel.classList.contains(
+          "hidden"
+        );
+
+
+      panel.classList.toggle(
+        "hidden"
+      );
+
+
+      if (
+        opening &&
+        !chatMounted
+      ) {
+
+        chatMounted =
+          true;
+
+
+        chatChannel =
+          mountChatPanel(
+            panel,
+            {
+              roomId:
+                room.id,
+
+              userId:
+                currentUser.id,
+
+              username:
+                currentProfile.username
+
+            }
+          );
+
+      }
+
     }
-  });
+  );
 }
 
+
 // =========================================================
-// ROUND TIMER + END OF ROUND
+// ROUND TIMER
 // =========================================================
+
 function startTimerDisplay() {
-  timerDisplayInterval = setInterval(() => {
-    const remainingMs = Math.max(0, roundEndsAtMs - Date.now());
-    const totalSeconds = Math.ceil(remainingMs / 1000);
-    const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
-    const ss = String(totalSeconds % 60).padStart(2, "0");
-    document.getElementById("timerLabel").textContent = `${mm}:${ss}`;
 
-    if (remainingMs <= 0 && !roundEnded) {
-      onRoundEnd();
-    }
-  }, 250);
+  if (
+    timerDisplayInterval
+  ) {
+    clearInterval(
+      timerDisplayInterval
+    );
+  }
+
+
+  timerDisplayInterval =
+    setInterval(
+      () => {
+
+        const remainingMs =
+          Math.max(
+            0,
+            roundEndsAtMs -
+              Date.now()
+          );
+
+
+        const totalSeconds =
+          Math.ceil(
+            remainingMs /
+              1000
+          );
+
+
+        const mm =
+          String(
+            Math.floor(
+              totalSeconds /
+                60
+            )
+          ).padStart(
+            2,
+            "0"
+          );
+
+
+        const ss =
+          String(
+            totalSeconds %
+              60
+          ).padStart(
+            2,
+            "0"
+          );
+
+
+        const timer =
+          document.getElementById(
+            "timerLabel"
+          );
+
+
+        if (timer) {
+
+          timer.textContent =
+            `${mm}:${ss}`;
+
+        }
+
+
+        if (
+          remainingMs <= 0 &&
+          !roundEnded
+        ) {
+
+          onRoundEnd();
+
+        }
+
+      },
+
+      250
+    );
 }
+
+
+// =========================================================
+// ROUND END
+// =========================================================
 
 async function onRoundEnd() {
-  if (roundEnded) return;
-  roundEnded = true;
 
-  if (bombSpawnTimer) clearInterval(bombSpawnTimer);
-  document.getElementById("pickupBtn").disabled = true;
-  document.getElementById("throwBtn").disabled = true;
-  document.getElementById("roundEndOverlay").classList.remove("hidden");
-
-  if (isHost) {
-    await finalizeRoundAsHost(room.id, roundId);
+  if (
+    roundEnded
+  ) {
+    return;
   }
-  await waitForRoundResultsAndRedirect(roundId);
+
+
+  roundEnded =
+    true;
+
+
+  if (
+    bombSpawnTimer
+  ) {
+
+    clearInterval(
+      bombSpawnTimer
+    );
+
+    bombSpawnTimer =
+      null;
+
+  }
+
+
+  const pickupBtn =
+    document.getElementById(
+      "pickupBtn"
+    );
+
+  const throwBtn =
+    document.getElementById(
+      "throwBtn"
+    );
+
+  const overlay =
+    document.getElementById(
+      "roundEndOverlay"
+    );
+
+
+  if (pickupBtn) {
+    pickupBtn.disabled =
+      true;
+  }
+
+  if (throwBtn) {
+    throwBtn.disabled =
+      true;
+  }
+
+  if (overlay) {
+    overlay.classList.remove(
+      "hidden"
+    );
+  }
+
+
+  try {
+
+    if (isHost) {
+
+      await finalizeRoundAsHost(
+        room.id,
+        roundId
+      );
+
+    }
+
+
+    await waitForRoundResultsAndRedirect(
+      roundId
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Round ending error:",
+      error
+    );
+
+    alert(
+      "The round ended, but the results could not be loaded."
+    );
+
+  }
 }
 
+
 // =========================================================
-// MAIN LOOP
+// MAIN GAME LOOP
 // =========================================================
+
 function loop(timestamp) {
-  const dt = lastFrameTime ? Math.min(0.05, (timestamp - lastFrameTime) / 1000) : 0;
-  lastFrameTime = timestamp;
+
+  const dt =
+    lastFrameTime
+      ? Math.min(
+          0.05,
+          (
+            timestamp -
+            lastFrameTime
+          ) / 1000
+        )
+      : 0;
+
+
+  lastFrameTime =
+    timestamp;
+
+
   update(dt);
+
   render();
-  requestAnimationFrame(loop);
+
+
+  requestAnimationFrame(
+    loop
+  );
 }
+
+
+// =========================================================
+// UPDATE
+// =========================================================
 
 function update(dt) {
-  if (!myPlayer.eliminated && !roundEnded) {
-    const input = getMovementVector(joystickState);
-    myPlayer.updateLocal(input, dt, arena);
+
+  if (
+    myPlayer &&
+    !myPlayer.eliminated &&
+    !roundEnded
+  ) {
+
+    const input =
+      getMovementVector(
+        joystickState
+      );
+
+
+    myPlayer.updateLocal(
+      input,
+      dt,
+      arena
+    );
+
   }
-  broadcastPosition(false);
 
-  Object.values(otherPlayers).forEach((p) => p.updateRemote(dt));
 
-  Object.values(bombs).forEach((b) => {
-    if (b.state === "thrown") {
-      const elapsed = performance.now() - b.startTime;
-      const t = Math.min(1, elapsed / b.travelMs);
-      b.renderX = b.x + (b.targetX - b.x) * t;
-      b.renderY = b.y + (b.targetY - b.y) * t;
+  broadcastPosition(
+    false
+  );
+
+
+  Object.values(
+    otherPlayers
+  ).forEach(
+    p => {
+
+      p.updateRemote(
+        dt
+      );
+
     }
-  });
+  );
+
+
+  Object.values(
+    bombs
+  ).forEach(
+    b => {
+
+      if (
+        b.state !==
+        "thrown"
+      ) {
+        return;
+      }
+
+
+      const elapsed =
+        performance.now() -
+        b.startTime;
+
+
+      const t =
+        Math.min(
+          1,
+          elapsed /
+            b.travelMs
+        );
+
+
+      b.renderX =
+        b.x +
+        (
+          b.targetX -
+          b.x
+        ) * t;
+
+
+      b.renderY =
+        b.y +
+        (
+          b.targetY -
+          b.y
+        ) * t;
+
+    }
+  );
+
 
   updateActionButtonsUI();
 }
 
+
+// =========================================================
+// RENDER
+// =========================================================
+
 function render() {
-  ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-  const scale = Math.min(logicalWidth / WORLD_SIZE, logicalHeight / WORLD_SIZE);
-  const offsetX = (logicalWidth - WORLD_SIZE * scale) / 2;
-  const offsetY = (logicalHeight - WORLD_SIZE * scale) / 2;
+
+  if (
+    !ctx ||
+    !arena
+  ) {
+    return;
+  }
+
+
+  ctx.clearRect(
+    0,
+    0,
+    logicalWidth,
+    logicalHeight
+  );
+
+
+  const scale =
+    Math.min(
+      logicalWidth /
+        WORLD_SIZE,
+
+      logicalHeight /
+        WORLD_SIZE
+    );
+
+
+  const offsetX =
+    (
+      logicalWidth -
+      WORLD_SIZE *
+        scale
+    ) / 2;
+
+
+  const offsetY =
+    (
+      logicalHeight -
+      WORLD_SIZE *
+        scale
+    ) / 2;
+
 
   ctx.save();
-  ctx.translate(offsetX, offsetY);
-  ctx.scale(scale, scale);
 
-  ctx.fillStyle = "#1c2e1c";
-  ctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+  ctx.translate(
+    offsetX,
+    offsetY
+  );
+
+
+  ctx.scale(
+    scale,
+    scale
+  );
+
+
+  // -------------------------------------------------------
+  // Ground
+  // -------------------------------------------------------
+
+  ctx.fillStyle =
+    "#1c2e1c";
+
+
+  ctx.fillRect(
+    0,
+    0,
+    WORLD_SIZE,
+    WORLD_SIZE
+  );
+
+
   drawGroundGrid();
+
   drawObstacles();
 
-  Object.values(bombs).forEach((b) => {
-    if (b.state === "idle") drawBomb(ctx, b);
-    if (b.state === "thrown") drawBomb(ctx, { x: b.renderX ?? b.x, y: b.renderY ?? b.y });
-  });
 
-  const all = [myPlayer, ...Object.values(otherPlayers)].filter((p) => !p.eliminated).sort((a, b) => a.y - b.y);
-  all.forEach((p) => p.draw(ctx));
+  // -------------------------------------------------------
+  // Bombs
+  // -------------------------------------------------------
 
-  Object.values(bombs).forEach((b) => {
-    if (b.state !== "carried") return;
-    const carrier = b.carriedBy === currentUser.id ? myPlayer : otherPlayers[b.carriedBy];
-    if (carrier) drawBomb(ctx, { x: carrier.x + 20, y: carrier.y - 30 });
-  });
+  Object.values(
+    bombs
+  ).forEach(
+    b => {
 
-  const now = performance.now();
-  explosions = explosions.filter((e) => now - e.startTime < 500);
-  explosions.forEach((e) => drawExplosion(ctx, e, now - e.startTime));
+      if (
+        b.state ===
+        "idle"
+      ) {
+
+        drawBomb(
+          ctx,
+          b
+        );
+
+      }
+
+
+      if (
+        b.state ===
+        "thrown"
+      ) {
+
+        drawBomb(
+          ctx,
+          {
+            x:
+              b.renderX ??
+              b.x,
+
+            y:
+              b.renderY ??
+              b.y
+          }
+        );
+
+      }
+
+    }
+  );
+
+
+  // -------------------------------------------------------
+  // Players
+  // -------------------------------------------------------
+
+  const allPlayers =
+    [
+      myPlayer,
+      ...Object.values(
+        otherPlayers
+      )
+    ]
+      .filter(
+        p =>
+          p &&
+          !p.eliminated
+      )
+      .sort(
+        (a, b) =>
+          a.y -
+          b.y
+      );
+
+
+  allPlayers.forEach(
+    p =>
+      p.draw(ctx)
+  );
+
+
+  // -------------------------------------------------------
+  // Carried bombs
+  // -------------------------------------------------------
+
+  Object.values(
+    bombs
+  ).forEach(
+    b => {
+
+      if (
+        b.state !==
+        "carried"
+      ) {
+        return;
+      }
+
+
+      const carrier =
+        b.carriedBy ===
+        currentUser.id
+
+          ? myPlayer
+
+          : otherPlayers[
+              b.carriedBy
+            ];
+
+
+      if (carrier) {
+
+        drawBomb(
+          ctx,
+          {
+            x:
+              carrier.x +
+              20,
+
+            y:
+              carrier.y -
+              30
+          }
+        );
+
+      }
+
+    }
+  );
+
+
+  // -------------------------------------------------------
+  // Explosions
+  // -------------------------------------------------------
+
+  const now =
+    performance.now();
+
+
+  explosions =
+    explosions.filter(
+      e =>
+        now -
+          e.startTime <
+        500
+    );
+
+
+  explosions.forEach(
+    e =>
+      drawExplosion(
+        ctx,
+        e,
+        now -
+          e.startTime
+      )
+  );
+
 
   ctx.restore();
 }
 
+
+// =========================================================
+// GROUND GRID
+// =========================================================
+
 function drawGroundGrid() {
-  ctx.strokeStyle = "rgba(255,255,255,0.04)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= WORLD_SIZE; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_SIZE); ctx.stroke(); }
-  for (let y = 0; y <= WORLD_SIZE; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_SIZE, y); ctx.stroke(); }
+
+  ctx.strokeStyle =
+    "rgba(255,255,255,0.04)";
+
+  ctx.lineWidth =
+    1;
+
+
+  for (
+    let x = 0;
+    x <= WORLD_SIZE;
+    x += 60
+  ) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      0
+    );
+
+    ctx.lineTo(
+      x,
+      WORLD_SIZE
+    );
+
+    ctx.stroke();
+
+  }
+
+
+  for (
+    let y = 0;
+    y <= WORLD_SIZE;
+    y += 60
+  ) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      y
+    );
+
+    ctx.lineTo(
+      WORLD_SIZE,
+      y
+    );
+
+    ctx.stroke();
+
+  }
 }
 
-const OBSTACLE_COLORS = { wall: "#555b6e", box: "#8a5a2f", rock: "#6b6f76", tree: "#2f8f4e", building: "#4a4e63" };
+
+// =========================================================
+// OBSTACLES
+// =========================================================
+
+const OBSTACLE_COLORS = {
+
+  wall:
+    "#555b6e",
+
+  box:
+    "#8a5a2f",
+
+  rock:
+    "#6b6f76",
+
+  tree:
+    "#2f8f4e",
+
+  building:
+    "#4a4e63"
+
+};
+
 
 function drawObstacles() {
-  arena.obstacles.forEach((o) => {
-    ctx.fillStyle = OBSTACLE_COLORS[o.type] || "#666";
-    if (o.type === "rock" || o.type === "tree") {
-      ctx.beginPath();
-      ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillRect(o.x, o.y, o.w, o.h);
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.strokeRect(o.x, o.y, o.w, o.h);
+
+  arena.obstacles.forEach(
+    o => {
+
+      ctx.fillStyle =
+        OBSTACLE_COLORS[
+          o.type
+        ] ||
+        "#666";
+
+
+      if (
+        o.type ===
+          "rock" ||
+        o.type ===
+          "tree"
+      ) {
+
+        ctx.beginPath();
+
+
+        ctx.ellipse(
+
+          o.x +
+            o.w / 2,
+
+          o.y +
+            o.h / 2,
+
+          o.w / 2,
+
+          o.h / 2,
+
+          0,
+
+          0,
+
+          Math.PI *
+            2
+
+        );
+
+
+        ctx.fill();
+
+      } else {
+
+        ctx.fillRect(
+          o.x,
+          o.y,
+          o.w,
+          o.h
+        );
+
+
+        ctx.strokeStyle =
+          "rgba(0,0,0,0.25)";
+
+
+        ctx.strokeRect(
+          o.x,
+          o.y,
+          o.w,
+          o.h
+        );
+
+      }
+
     }
-  });
+  );
 }
 
-window.addEventListener("beforeunload", () => {
-  if (bombSpawnTimer) clearInterval(bombSpawnTimer);
-  if (timerDisplayInterval) clearInterval(timerDisplayInterval);
-  if (gameChannel) window.supabaseClient.removeChannel(gameChannel);
-  if (chatChannel) window.supabaseClient.removeChannel(chatChannel);
-});
+
+// =========================================================
+// CLEANUP
+// =========================================================
+
+window.addEventListener(
+  "beforeunload",
+  () => {
+
+    if (
+      bombSpawnTimer
+    ) {
+
+      clearInterval(
+        bombSpawnTimer
+      );
+
+    }
+
+
+    if (
+      timerDisplayInterval
+    ) {
+
+      clearInterval(
+        timerDisplayInterval
+      );
+
+    }
+
+
+    if (
+      gameChannel
+    ) {
+
+      window.supabaseClient
+        .removeChannel(
+          gameChannel
+        );
+
+    }
+
+
+    if (
+      chatChannel
+    ) {
+
+      window.supabaseClient
+        .removeChannel(
+          chatChannel
+        );
+
+    }
+
+  }
+);
+
+
+// =========================================================
+// START
+// =========================================================
 
 initGame();
