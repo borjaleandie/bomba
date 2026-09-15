@@ -357,7 +357,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Get the room
+  // Get current room
   // -------------------------------------------------------
 
   const {
@@ -425,7 +425,43 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Check status
+  // IMPORTANT:
+  // If another call already changed the room
+  // to "starting", don't throw an error.
+  // -------------------------------------------------------
+
+  if (
+    room.status === "starting"
+  ) {
+
+    console.log(
+      "Room is already starting."
+    );
+
+    return room;
+
+  }
+
+
+  // -------------------------------------------------------
+  // If already playing, simply return the room.
+  // -------------------------------------------------------
+
+  if (
+    room.status === "playing"
+  ) {
+
+    console.log(
+      "Room is already playing."
+    );
+
+    return room;
+
+  }
+
+
+  // -------------------------------------------------------
+  // Only WAITING rooms can begin.
   // -------------------------------------------------------
 
   if (
@@ -489,7 +525,7 @@ async function beginStartSequence(
 
 
   // -------------------------------------------------------
-  // Minimum 2 players
+  // Require at least 2 players
   // -------------------------------------------------------
 
   if (
@@ -526,14 +562,18 @@ async function beginStartSequence(
     throw new Error(
       `${notReady} player${
         notReady === 1 ? "" : "s"
-      } ${notReady === 1 ? "is" : "are"} not ready.`
+      } ${
+        notReady === 1
+          ? "is"
+          : "are"
+      } not ready.`
     );
 
   }
 
 
   // -------------------------------------------------------
-  // Change waiting → starting
+  // Change WAITING → STARTING
   // -------------------------------------------------------
 
   const {
@@ -563,20 +603,62 @@ async function beginStartSequence(
   }
 
 
+  // -------------------------------------------------------
+  // If another request started it at the same time,
+  // retrieve the latest room instead of showing an error.
+  // -------------------------------------------------------
+
   if (
     !updatedRooms ||
     updatedRooms.length === 0
   ) {
 
+    const {
+      data: latestRooms,
+      error: latestError
+    } = await window.supabaseClient
+      .from("game_rooms")
+      .select(`
+        id,
+        host_id,
+        status,
+        player_limit
+      `)
+      .eq("id", roomId)
+      .limit(1);
+
+
+    if (latestError) {
+      throw latestError;
+    }
+
+
+    const latestRoom =
+      latestRooms?.[0];
+
+
+    if (
+      latestRoom?.status === "starting"
+    ) {
+
+      console.log(
+        "Room was already changed to starting."
+      );
+
+      return latestRoom;
+
+    }
+
+
     throw new Error(
-      "The room could not be started. It may have already been started."
+      "The room could not be started."
     );
 
   }
 
 
   console.log(
-    "Room changed to starting:",
+    "Room changed to STARTING:",
     updatedRooms[0]
   );
 
@@ -648,6 +730,10 @@ async function markRoomPlaying(
     rooms[0];
 
 
+  // -------------------------------------------------------
+  // Check host
+  // -------------------------------------------------------
+
   if (
     room.host_id !== user.id
   ) {
@@ -659,6 +745,27 @@ async function markRoomPlaying(
   }
 
 
+  // -------------------------------------------------------
+  // Already playing
+  // -------------------------------------------------------
+
+  if (
+    room.status === "playing"
+  ) {
+
+    console.log(
+      "Room is already playing."
+    );
+
+    return room;
+
+  }
+
+
+  // -------------------------------------------------------
+  // Must currently be starting
+  // -------------------------------------------------------
+
   if (
     room.status !== "starting"
   ) {
@@ -669,6 +776,10 @@ async function markRoomPlaying(
 
   }
 
+
+  // -------------------------------------------------------
+  // Change STARTING → PLAYING
+  // -------------------------------------------------------
 
   const {
     data: updatedRooms,
@@ -699,16 +810,58 @@ async function markRoomPlaying(
   }
 
 
+  // -------------------------------------------------------
+  // Another request may have already changed it.
+  // -------------------------------------------------------
+
   if (
     !updatedRooms ||
     updatedRooms.length === 0
   ) {
+
+    const {
+      data: latestRooms,
+      error: latestError
+    } = await window.supabaseClient
+      .from("game_rooms")
+      .select(`
+        id,
+        host_id,
+        status
+      `)
+      .eq("id", roomId)
+      .limit(1);
+
+
+    if (latestError) {
+      throw latestError;
+    }
+
+
+    const latestRoom =
+      latestRooms?.[0];
+
+
+    if (
+      latestRoom?.status === "playing"
+    ) {
+
+      return latestRoom;
+
+    }
+
 
     throw new Error(
       "Could not start the game."
     );
 
   }
+
+
+  console.log(
+    "Room changed to PLAYING:",
+    updatedRooms[0]
+  );
 
 
   return updatedRooms[0];
