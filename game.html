@@ -2,86 +2,479 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  />
+
   <title>BOMB ARENA — Playing</title>
+
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/game.css" />
+
   <style>
+    /* =====================================================
+       BOMB READY HUD
+       ===================================================== */
+
     #bombReadyHud {
-      position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
-      background: rgba(255,209,102,0.15); border: 1px solid var(--color-accent);
-      color: var(--color-accent); font-weight: 800; font-size: 13px;
-      padding: 6px 14px; border-radius: 20px; z-index: 20;
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+
+      background: rgba(255, 209, 102, 0.15);
+      border: 1px solid var(--color-accent);
+
+      color: var(--color-accent);
+      font-weight: 800;
+      font-size: 13px;
+
+      padding: 6px 14px;
+      border-radius: 20px;
+
+      z-index: 20;
+
+      pointer-events: none;
     }
+
+
+    /* =====================================================
+       TIMER
+       ===================================================== */
+
+    #timerLabel {
+      position: fixed;
+
+      top: max(10px, env(safe-area-inset-top));
+      left: 50%;
+
+      transform: translateX(-50%);
+
+      background: rgba(20, 22, 31, 0.75);
+      border: 1px solid var(--color-border);
+
+      border-radius: 10px;
+
+      padding: 6px 16px;
+
+      font-size: 16px;
+      font-weight: 900;
+
+      color: var(--color-accent);
+
+      z-index: 20;
+
+      pointer-events: none;
+    }
+
+
+    /* =====================================================
+       MOVEMENT JOYSTICK
+       ===================================================== */
+
+    #joystickZone {
+      position: fixed;
+
+      left: 20px;
+      bottom: calc(25px + env(safe-area-inset-bottom));
+
+      width: 150px;
+      height: 150px;
+
+      z-index: 100;
+
+      touch-action: none;
+
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+
+    /* =====================================================
+       AIM JOYSTICK
+       ===================================================== */
+
+    #aimJoystickZone {
+      position: fixed;
+
+      right: 20px;
+      bottom: calc(25px + env(safe-area-inset-bottom));
+
+      width: 150px;
+      height: 150px;
+
+      z-index: 100;
+
+      touch-action: none;
+
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+
+    /* =====================================================
+       ACTION BUTTONS
+       ===================================================== */
+
+    #actionZone {
+      position: fixed;
+
+      right: 185px;
+      bottom: calc(35px + env(safe-area-inset-bottom));
+
+      display: flex;
+      gap: 10px;
+
+      z-index: 110;
+
+      pointer-events: auto;
+    }
+
+    .action-btn {
+      min-width: 75px;
+      min-height: 65px;
+
+      border-radius: 14px;
+
+      touch-action: manipulation;
+
+      user-select: none;
+      -webkit-user-select: none;
+
+      -webkit-tap-highlight-color: transparent;
+
+      font-weight: 900;
+      font-size: 12px;
+    }
+
+
+    /* =====================================================
+       ELIMINATION OVERLAY
+       ===================================================== */
+
     #eliminationOverlay {
-      position: fixed; inset: 0; background: rgba(10,10,15,0.92);
-      display:flex; align-items:center; justify-content:center; flex-direction:column;
+      position: fixed;
+      inset: 0;
+
+      background: rgba(10, 10, 15, 0.92);
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+
       z-index: 999;
     }
-    #elimTitle { font-size: 28px; font-weight: 900; color: var(--color-danger); margin-bottom: 10px; }
-    #elimNumber { font-size: 90px; font-weight: 900; color: var(--color-accent); }
-    #timerLabel {
-      position: fixed; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-      background: rgba(20,22,31,0.75); border: 1px solid var(--color-border); border-radius: 10px;
-      padding: 6px 16px; font-size: 16px; font-weight: 900; color: var(--color-accent); z-index: 20;
+
+    #elimTitle {
+      font-size: 28px;
+      font-weight: 900;
+
+      color: var(--color-danger);
+
+      margin-bottom: 10px;
     }
+
+    #elimNumber {
+      font-size: 90px;
+      font-weight: 900;
+
+      color: var(--color-accent);
+    }
+
+
+    /* =====================================================
+       ROUND END
+       ===================================================== */
+
     #roundEndOverlay {
-      position: fixed; inset: 0; background: rgba(10,10,15,0.92);
-      display:flex; align-items:center; justify-content:center; flex-direction:column;
-      z-index: 998; color: var(--color-text-dim); font-weight:700;
+      position: fixed;
+      inset: 0;
+
+      background: rgba(10, 10, 15, 0.92);
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      flex-direction: column;
+
+      z-index: 998;
+
+      color: var(--color-text-dim);
+
+      font-weight: 700;
     }
-    #chatOverlayPanel { padding: 0; }
+
+
+    /* =====================================================
+       CHAT
+       ===================================================== */
+
+    #chatOverlayPanel {
+      padding: 0;
+    }
+
+
+    /* =====================================================
+       MOBILE LAYOUT
+       ===================================================== */
+
+    @media (max-width: 700px) {
+
+      #joystickZone {
+        left: 10px;
+        bottom: calc(15px + env(safe-area-inset-bottom));
+
+        width: 130px;
+        height: 130px;
+      }
+
+      #aimJoystickZone {
+        right: 10px;
+        bottom: calc(15px + env(safe-area-inset-bottom));
+
+        width: 130px;
+        height: 130px;
+      }
+
+      #actionZone {
+        right: 145px;
+
+        bottom: calc(25px + env(safe-area-inset-bottom));
+
+        flex-direction: column;
+
+        gap: 6px;
+      }
+
+      .action-btn {
+        min-width: 68px;
+        min-height: 58px;
+
+        font-size: 10px;
+      }
+    }
+
+
+    /* =====================================================
+       VERY SMALL PHONES
+       ===================================================== */
+
+    @media (max-width: 430px) {
+
+      #joystickZone {
+        width: 110px;
+        height: 110px;
+      }
+
+      #aimJoystickZone {
+        width: 110px;
+        height: 110px;
+      }
+
+      #actionZone {
+        right: 125px;
+      }
+
+      .action-btn {
+        min-width: 60px;
+        min-height: 52px;
+
+        font-size: 9px;
+      }
+    }
   </style>
 </head>
+
 <body class="game-body">
+
   <div id="gameContainer">
+
+    <!-- ===================================================
+         GAME CANVAS
+         =================================================== -->
+
     <canvas id="gameCanvas"></canvas>
 
+
+    <!-- ===================================================
+         HUD
+         =================================================== -->
+
     <div id="hud">
-      <div class="hud-pill">💣 <span id="roomCodeLabel">------</span></div>
-      <div class="hud-pill" id="mapLabel">Arena</div>
+
+      <div class="hud-pill">
+        💣
+        <span id="roomCodeLabel">------</span>
+      </div>
+
+      <div class="hud-pill" id="mapLabel">
+        Arena
+      </div>
+
     </div>
 
-    <div id="bombReadyHud" class="hidden">💣 BOMB READY</div>
-    <div id="timerLabel">05:00</div>
+
+    <!-- ===================================================
+         BOMB STATUS
+         =================================================== -->
+
+    <div id="bombReadyHud" class="hidden">
+      💣 BOMB READY
+    </div>
+
+
+    <!-- ===================================================
+         TIMER
+         =================================================== -->
+
+    <div id="timerLabel">
+      05:00
+    </div>
+
+
+    <!-- ===================================================
+         MOBILE MOVEMENT JOYSTICK
+         =================================================== -->
 
     <div id="joystickZone"></div>
 
+
+    <!-- ===================================================
+         MOBILE AIM JOYSTICK
+         =================================================== -->
+
+    <div id="aimJoystickZone"></div>
+
+
+    <!-- ===================================================
+         ACTION BUTTONS
+         =================================================== -->
+
     <div id="actionZone">
-      <button id="pickupBtn" class="action-btn">PICK UP<br>💣</button>
-      <button id="throwBtn" class="action-btn">THROW<br>💥</button>
+
+      <button
+        id="pickupBtn"
+        class="action-btn"
+        type="button"
+      >
+        PICK UP<br>💣
+      </button>
+
+      <button
+        id="throwBtn"
+        class="action-btn"
+        type="button"
+      >
+        THROW<br>💥
+      </button>
+
     </div>
 
-    <button id="chatToggleBtn">💬</button>
-    <div id="chatOverlayPanel" class="chat-panel hidden"></div>
+
+    <!-- ===================================================
+         CHAT
+         =================================================== -->
+
+    <button
+      id="chatToggleBtn"
+      type="button"
+    >
+      💬
+    </button>
+
+    <div
+      id="chatOverlayPanel"
+      class="chat-panel hidden"
+    ></div>
+
   </div>
+
+
+  <!-- =====================================================
+       ELIMINATION OVERLAY
+       ===================================================== -->
 
   <div id="eliminationOverlay" class="hidden">
-    <div id="elimTitle">💥 ELIMINATED!</div>
-    <div id="elimNumber">RESPAWNING...</div>
+
+    <div id="elimTitle">
+      💥 ELIMINATED!
+    </div>
+
+    <div id="elimNumber">
+      RESPAWNING...
+    </div>
+
   </div>
+
+
+  <!-- =====================================================
+       ROUND END OVERLAY
+       ===================================================== -->
 
   <div id="roundEndOverlay" class="hidden">
-    <div style="font-size:20px;margin-bottom:10px;">⏱️ TIME'S UP</div>
-    <div>Calculating results...</div>
+
+    <div
+      style="
+        font-size:20px;
+        margin-bottom:10px;
+      "
+    >
+      ⏱️ TIME'S UP
+    </div>
+
+    <div>
+      Calculating results...
+    </div>
+
   </div>
 
+
+  <!-- =====================================================
+       JAVASCRIPT
+       IMPORTANT:
+       Keep this order.
+       ===================================================== -->
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
   <script src="js/supabase.js"></script>
+
   <script src="js/auth.js"></script>
+
   <script src="js/character.js"></script>
+
   <script src="js/room.js"></script>
+
   <script src="js/lobby.js"></script>
+
   <script src="js/collision.js"></script>
+
+  <!-- Mobile controls MUST load before game.js -->
   <script src="js/mobile-controls.js"></script>
+
   <script src="js/player.js"></script>
+
   <script src="js/realtime.js"></script>
+
   <script src="js/bomb.js"></script>
+
   <script src="js/respawn.js"></script>
+
   <script src="js/scoreboard.js"></script>
+
   <script src="js/chat.js"></script>
+
+  <!-- Results functions MUST load before game.js -->
   <script src="js/reports.js"></script>
+
   <script src="js/sound.js"></script>
+
+  <!-- game.js MUST be last -->
   <script src="js/game.js"></script>
+
 </body>
 </html>
