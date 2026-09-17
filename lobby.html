@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -144,97 +145,105 @@
       letter-spacing: 2px;
     }
   </style>
+
 </head>
 
 <body>
 
   <div class="page">
 
-    <div
-      id="loadingState"
-      style="text-align:center;padding-top:60px;color:var(--color-text-dim);"
-    >
-      Loading room...
-    </div>
+```
+<div
+  id="loadingState"
+  style="text-align:center;padding-top:60px;color:var(--color-text-dim);"
+>
+  Loading room...
+</div>
+
+<div
+  id="errorState"
+  class="hidden card"
+  style="text-align:center;"
+>
+  <p id="errorMsg"></p>
+
+  <a href="index.html" class="btn">
+    BACK TO MENU
+  </a>
+</div>
+
+<div id="lobbyContent" class="hidden">
+
+  <div class="room-code-box">
 
     <div
-      id="errorState"
-      class="hidden card"
-      style="text-align:center;"
+      style="color:var(--color-text-dim);font-size:12px;letter-spacing:2px;"
     >
-      <p id="errorMsg"></p>
-
-      <a href="index.html" class="btn">
-        BACK TO MENU
-      </a>
+      ROOM CODE
     </div>
 
-    <div id="lobbyContent" class="hidden">
-
-      <div class="room-code-box">
-
-        <div
-          style="color:var(--color-text-dim);font-size:12px;letter-spacing:2px;"
-        >
-          ROOM CODE
-        </div>
-
-        <div class="code" id="roomCode">
-          ------
-        </div>
-
-      </div>
-
-      <div class="room-meta" id="roomMeta"></div>
-
-      <div class="card" style="padding:0;">
-        <div id="playerList"></div>
-      </div>
-
-      <div class="status-line" id="statusLine"></div>
-
-      <button id="readyBtn">
-        READY
-      </button>
-
-      <button id="startBtn" class="hidden">
-        START GAME
-      </button>
-
-      <button id="leaveBtn" class="btn-secondary">
-        LEAVE ROOM
-      </button>
-
+    <div class="code" id="roomCode">
+      ------
     </div>
+
   </div>
 
+  <div class="room-meta" id="roomMeta"></div>
+
+  <div class="card" style="padding:0;">
+    <div id="playerList"></div>
+  </div>
+
+  <div class="status-line" id="statusLine"></div>
+
+  <button id="readyBtn">
+    READY
+  </button>
+
+  <button id="startBtn" class="hidden">
+    START GAME
+  </button>
+
+  <button id="leaveBtn" class="btn-secondary">
+    LEAVE ROOM
+  </button>
+
+</div>
+```
+
+  </div>
 
   <!-- COUNTDOWN -->
 
   <div id="countdownOverlay" class="hidden">
 
-    <div id="countdownNumber">
-      3
-    </div>
+```
+<div id="countdownNumber">
+  3
+</div>
 
-    <div id="countdownLabel">
-      GET READY
-    </div>
+<div id="countdownLabel">
+  GET READY
+</div>
+```
 
   </div>
-
 
   <!-- Supabase -->
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
   <script src="js/supabase.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/character.js"></script>
-  <script src="js/room.js"></script>
-  <script src="js/realtime.js"></script>
-  <script src="js/lobby.js"></script>
 
+  <script src="js/auth.js"></script>
+
+  <script src="js/character.js"></script>
+
+  <script src="js/room.js"></script>
+
+  <script src="js/realtime.js"></script>
+
+  <script src="js/lobby.js"></script>
 
   <script>
 
@@ -552,8 +561,6 @@
           room.status === "playing"
         ) {
 
-          // IMPORTANT:
-          // Never enter game.html if the room has no round.
           if (!room.current_round_id) {
 
             showError(
@@ -890,10 +897,6 @@
         );
 
 
-      // ---------------------------------------------------
-      // Don't allow buttons while starting/playing
-      // ---------------------------------------------------
-
       if (
         room.status !== "waiting"
       ) {
@@ -1090,7 +1093,6 @@
         );
 
 
-      // Prevent double click
       if (
         startBtn.disabled ||
         countdownStarted
@@ -1116,21 +1118,22 @@
 
 
         // =================================================
-        // IMPORTANT FIX
+        // IMPORTANT:
         //
-        // startGame() does ALL of these:
+        // beginStartSequence() is the actual start function
+        // defined in js/lobby.js.
         //
-        // 1. Checks the host
-        // 2. Checks players
-        // 3. Checks ready status
-        // 4. Creates game_rounds row
-        // 5. Saves round.id to current_round_id
-        // 6. Changes room to playing
-        //
+        // It checks:
+        // 1. Host
+        // 2. Players
+        // 3. Ready status
+        // 4. Game round
+        // 5. current_round_id
+        // 6. Room status
         // =================================================
 
         const startedRoom =
-          await startGame(
+          await beginStartSequence(
             room.id
           );
 
@@ -1229,10 +1232,6 @@
         newRoom;
 
 
-      // ---------------------------------------------------
-      // STARTING
-      // ---------------------------------------------------
-
       if (
         newRoom.status ===
         "starting"
@@ -1256,10 +1255,6 @@
 
       }
 
-
-      // ---------------------------------------------------
-      // PLAYING
-      // ---------------------------------------------------
 
       if (
         newRoom.status ===
@@ -1377,10 +1372,6 @@
             n--;
 
 
-            // ---------------------------------------------
-            // 2 / 1
-            // ---------------------------------------------
-
             if (
               n > 0
             ) {
@@ -1392,10 +1383,6 @@
 
             }
 
-
-            // ---------------------------------------------
-            // GO!
-            // ---------------------------------------------
 
             numberEl.textContent =
               "GO!";
@@ -1413,16 +1400,6 @@
             countdownInterval =
               null;
 
-
-            // ---------------------------------------------
-            // IMPORTANT:
-            //
-            // startGame() already changed the database
-            // room to PLAYING.
-            //
-            // We do NOT call markRoomPlaying()
-            // again here.
-            // ---------------------------------------------
 
             setTimeout(
               () => {
@@ -1455,11 +1432,6 @@
 
       }
 
-
-      // ---------------------------------------------------
-      // SAFETY:
-      // Don't enter game.html without an active round.
-      // ---------------------------------------------------
 
       if (
         !room ||
