@@ -2,141 +2,964 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+  />
+
   <title>Results — BOMB ARENA</title>
+
   <link rel="stylesheet" href="css/style.css" />
+
   <style>
-    .winner-card { text-align:center; }
-    .winner-crown { font-size: 40px; }
-    .winner-name { font-size: 24px; font-weight: 900; margin: 6px 0; }
-    .winner-stats { color: var(--color-text-dim); font-size: 14px; }
+    .winner-card {
+      text-align: center;
+    }
+
+    .winner-crown {
+      font-size: 40px;
+    }
+
+    .winner-name {
+      font-size: 24px;
+      font-weight: 900;
+      margin: 6px 0;
+    }
+
+    .winner-stats {
+      color: var(--color-text-dim);
+      font-size: 14px;
+    }
 
     .leaderboard-row {
-      display:flex; align-items:center; gap:12px;
-      padding: 12px 14px; border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--color-border);
     }
-    .leaderboard-row:last-child { border-bottom: none; }
-    .rank { font-weight:900; width: 30px; font-size:16px; }
-    .lb-name { flex:1; font-weight:700; }
-    .lb-score { font-weight:900; color: var(--color-accent); }
-    .lb-sub { color: var(--color-text-dim); font-size:11px; }
-    .you-row { background: rgba(255,209,102,0.06); }
+
+    .leaderboard-row:last-child {
+      border-bottom: none;
+    }
+
+    .rank {
+      font-weight: 900;
+      width: 30px;
+      font-size: 16px;
+    }
+
+    .lb-name {
+      flex: 1;
+      font-weight: 700;
+    }
+
+    .lb-score {
+      font-weight: 900;
+      color: var(--color-accent);
+    }
+
+    .lb-sub {
+      color: var(--color-text-dim);
+      font-size: 11px;
+    }
+
+    .you-row {
+      background: rgba(255, 209, 102, 0.06);
+    }
+
+    /* Loading */
+    .results-loading {
+      text-align: center;
+      padding-top: 60px;
+    }
+
+    .loading-icon {
+      font-size: 42px;
+      margin-bottom: 12px;
+      animation: bombPulse 1s infinite;
+    }
+
+    @keyframes bombPulse {
+      0% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.12);
+      }
+
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    .loading-text {
+      color: var(--color-text-dim);
+      font-size: 14px;
+    }
+
+    .loading-round {
+      color: var(--color-text-dim);
+      font-size: 11px;
+      margin-top: 8px;
+    }
+
+    .error-box {
+      margin-top: 20px;
+      text-align: center;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+    }
+
+    .retry-btn {
+      margin-top: 12px;
+    }
   </style>
 </head>
+
 <body>
+
   <div class="page">
-    <div id="loadingState" style="text-align:center;padding-top:60px;color:var(--color-text-dim);">Loading results...</div>
+
+    <!-- =====================================================
+         LOADING
+         ===================================================== -->
+
+    <div id="loadingState" class="results-loading">
+
+      <div class="loading-icon">💣</div>
+
+      <div class="loading-text" id="loadingText">
+        Loading results...
+      </div>
+
+      <div class="loading-round" id="loadingRound">
+        Please wait...
+      </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         RESULTS
+         ===================================================== -->
 
     <div id="resultsContent" class="hidden">
-      <div class="brand" style="font-size:22px;">🏆 ROUND COMPLETE</div>
+
+      <div
+        class="brand"
+        style="font-size:22px;"
+      >
+        🏆 ROUND COMPLETE
+      </div>
+
+
+      <!-- WINNER -->
 
       <div class="card winner-card">
-        <div class="winner-crown">👑</div>
-        <div style="color:var(--color-text-dim);font-size:12px;letter-spacing:2px;">WINNER</div>
-        <div class="winner-name" id="winnerName">-</div>
-        <div class="winner-stats" id="winnerStats"></div>
+
+        <div class="winner-crown">
+          👑
+        </div>
+
+        <div
+          style="
+            color:var(--color-text-dim);
+            font-size:12px;
+            letter-spacing:2px;
+          "
+        >
+          WINNER
+        </div>
+
+        <div
+          class="winner-name"
+          id="winnerName"
+        >
+          -
+        </div>
+
+        <div
+          class="winner-stats"
+          id="winnerStats"
+        ></div>
+
       </div>
 
-      <div class="card" style="padding:0;">
+
+      <!-- LEADERBOARD -->
+
+      <div
+        class="card"
+        style="padding:0;"
+      >
+
         <div id="leaderboardList"></div>
+
       </div>
 
-      <h3 style="margin-top:22px;">💬 Chat</h3>
-      <div class="chat-panel" id="chatPanel"></div>
 
-      <a href="index.html" class="btn">BACK TO MAIN MENU</a>
+      <!-- CHAT -->
+
+      <h3 style="margin-top:22px;">
+        💬 Chat
+      </h3>
+
+      <div
+        class="chat-panel"
+        id="chatPanel"
+      ></div>
+
+
+      <!-- BACK -->
+
+      <a
+        href="index.html"
+        class="btn"
+      >
+        BACK TO MAIN MENU
+      </a>
+
     </div>
+
   </div>
 
+
+  <!-- =====================================================
+       SCRIPTS
+       ===================================================== -->
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/reports.js"></script>
   <script src="js/sound.js"></script>
+
+
   <script>
-    const RANK_ICONS = ["🥇", "🥈", "🥉"];
 
-    async function init() {
-      const user = await requireAuth();
-      if (!user) return;
+    /* =====================================================
+       CONSTANTS
+       ===================================================== */
 
-      const params = new URLSearchParams(window.location.search);
-      const roundId = params.get("round");
-      if (!roundId) { window.location.href = "index.html"; return; }
+    const RANK_ICONS = [
+      "🥇",
+      "🥈",
+      "🥉"
+    ];
 
-      const { data: result, error } = await window.supabaseClient
+    /*
+     * How long we wait for game_results.
+     *
+     * 20 attempts × 1 second = 20 seconds.
+     */
+    const MAX_RESULT_ATTEMPTS = 20;
+
+    const RESULT_RETRY_DELAY = 1000;
+
+
+    /* =====================================================
+       GET ROUND RESULTS
+       ===================================================== */
+
+    async function getRoundResults(roundId) {
+
+      const {
+        data,
+        error
+      } = await window.supabaseClient
         .from("game_results")
-        .select("room_id, winner_id, leaderboard")
-        .eq("round_id", roundId)
+        .select(
+          "room_id, winner_id, leaderboard"
+        )
+        .eq(
+          "round_id",
+          roundId
+        )
         .maybeSingle();
 
-      if (error || !result) {
-        document.getElementById("loadingState").textContent = "Results not ready yet — please wait a moment and refresh.";
+      if (error) {
+
+        console.error(
+          "Error loading game results:",
+          error
+        );
+
+        return null;
+      }
+
+      return data;
+    }
+
+
+    /* =====================================================
+       WAIT FOR RESULTS
+       ===================================================== */
+
+    async function waitForResults(roundId) {
+
+      const loadingText =
+        document.getElementById("loadingText");
+
+      const loadingRound =
+        document.getElementById("loadingRound");
+
+
+      for (
+        let attempt = 1;
+        attempt <= MAX_RESULT_ATTEMPTS;
+        attempt++
+      ) {
+
+        loadingText.textContent =
+          "Waiting for round results...";
+
+
+        loadingRound.textContent =
+          `Checking results... ${attempt}/${MAX_RESULT_ATTEMPTS}`;
+
+
+        console.log(
+          `Checking game_results: attempt ${attempt}`
+        );
+
+
+        const result =
+          await getRoundResults(roundId);
+
+
+        /*
+         * Results are ready.
+         */
+
+        if (result) {
+
+          console.log(
+            "Game results found:",
+            result
+          );
+
+          return result;
+        }
+
+
+        /*
+         * Wait before checking again.
+         */
+
+        if (
+          attempt < MAX_RESULT_ATTEMPTS
+        ) {
+
+          await new Promise(
+            resolve =>
+              setTimeout(
+                resolve,
+                RESULT_RETRY_DELAY
+              )
+          );
+
+        }
+
+      }
+
+
+      /*
+       * Results still don't exist.
+       */
+
+      return null;
+    }
+
+
+    /* =====================================================
+       MAIN INIT
+       ===================================================== */
+
+    async function init() {
+
+      try {
+
+        console.log(
+          "Initializing results page..."
+        );
+
+
+        /* -----------------------------------------------
+           AUTH
+           ----------------------------------------------- */
+
+        const user =
+          await requireAuth();
+
+
+        if (!user) {
+          return;
+        }
+
+
+        console.log(
+          "Logged in user:",
+          user.id
+        );
+
+
+        /* -----------------------------------------------
+           ROUND ID
+           ----------------------------------------------- */
+
+        const params =
+          new URLSearchParams(
+            window.location.search
+          );
+
+
+        const roundId =
+          params.get("round");
+
+
+        console.log(
+          "Round ID:",
+          roundId
+        );
+
+
+        if (!roundId) {
+
+          console.error(
+            "No round ID found in URL."
+          );
+
+          window.location.href =
+            "index.html";
+
+          return;
+        }
+
+
+        /* -----------------------------------------------
+           WAIT FOR SUPABASE RESULTS
+           ----------------------------------------------- */
+
+        const result =
+          await waitForResults(
+            roundId
+          );
+
+
+        if (!result) {
+
+          document.getElementById(
+            "loadingText"
+          ).textContent =
+            "Results are taking too long to appear.";
+
+
+          document.getElementById(
+            "loadingRound"
+          ).innerHTML = `
+            Please check your game data
+            and try again.
+            <br>
+
+            <button
+              class="btn retry-btn"
+              onclick="window.location.reload()"
+            >
+              🔄 RETRY
+            </button>
+          `;
+
+
+          return;
+        }
+
+
+        /* -----------------------------------------------
+           LEADERBOARD
+           ----------------------------------------------- */
+
+        let leaderboard =
+          result.leaderboard;
+
+
+        /*
+         * Sometimes JSON data can arrive as a string.
+         */
+
+        if (
+          typeof leaderboard === "string"
+        ) {
+
+          try {
+
+            leaderboard =
+              JSON.parse(
+                leaderboard
+              );
+
+          } catch (parseError) {
+
+            console.error(
+              "Could not parse leaderboard:",
+              parseError
+            );
+
+            leaderboard = [];
+          }
+
+        }
+
+
+        /*
+         * Make sure leaderboard is an array.
+         */
+
+        if (
+          !Array.isArray(leaderboard)
+        ) {
+
+          console.error(
+            "Invalid leaderboard:",
+            leaderboard
+          );
+
+          leaderboard = [];
+        }
+
+
+        console.log(
+          "Leaderboard:",
+          leaderboard
+        );
+
+
+        /* -----------------------------------------------
+           RENDER
+           ----------------------------------------------- */
+
+        renderResults(
+          leaderboard,
+          user.id
+        );
+
+
+        /* -----------------------------------------------
+           UPDATE LIFETIME STATS
+           ----------------------------------------------- */
+
+        await applyMyStatsOnce(
+          roundId,
+          leaderboard,
+          user.id
+        );
+
+
+        /* -----------------------------------------------
+           VICTORY SOUND
+           ----------------------------------------------- */
+
+        if (
+          leaderboard.length > 0 &&
+          leaderboard[0].user_id === user.id
+        ) {
+
+          if (
+            typeof playSound === "function"
+          ) {
+
+            playSound(
+              "victory"
+            );
+
+          }
+
+        }
+
+
+        /* -----------------------------------------------
+           CHAT
+           ----------------------------------------------- */
+
+        try {
+
+          const {
+            data: profile
+          } = await window.supabaseClient
+            .from("profiles")
+            .select("username")
+            .eq(
+              "id",
+              user.id
+            )
+            .single();
+
+
+          if (
+            typeof mountChatPanel === "function"
+          ) {
+
+            mountChatPanel(
+              document.getElementById(
+                "chatPanel"
+              ),
+              {
+                roomId:
+                  result.room_id,
+
+                userId:
+                  user.id,
+
+                username:
+                  profile?.username ||
+                  "Player"
+              }
+            );
+
+          }
+
+        } catch (chatError) {
+
+          console.warn(
+            "Chat could not be loaded:",
+            chatError
+          );
+
+        }
+
+
+        /* -----------------------------------------------
+           SHOW RESULTS
+           ----------------------------------------------- */
+
+        document
+          .getElementById(
+            "loadingState"
+          )
+          .classList
+          .add("hidden");
+
+
+        document
+          .getElementById(
+            "resultsContent"
+          )
+          .classList
+          .remove("hidden");
+
+
+        console.log(
+          "Results page loaded successfully."
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Results initialization error:",
+          error
+        );
+
+
+        document.getElementById(
+          "loadingText"
+        ).textContent =
+          "Could not load results.";
+
+
+        document.getElementById(
+          "loadingRound"
+        ).textContent =
+          error.message ||
+          "Unknown error occurred.";
+      }
+
+    }
+
+
+    /* =====================================================
+       RENDER RESULTS
+       ===================================================== */
+
+    function renderResults(
+      leaderboard,
+      currentUserId
+    ) {
+
+      const winner =
+        leaderboard[0];
+
+
+      /* -----------------------------------------------
+         WINNER
+         ----------------------------------------------- */
+
+      if (winner) {
+
+        document.getElementById(
+          "winnerName"
+        ).textContent =
+          winner.username ||
+          "Unknown Player";
+
+
+        document.getElementById(
+          "winnerStats"
+        ).textContent =
+          `KILLS: ${winner.kills || 0}  ·  ` +
+          `DEATHS: ${winner.deaths || 0}  ·  ` +
+          `SCORE: ${winner.score || 0}`;
+
+      } else {
+
+        document.getElementById(
+          "winnerName"
+        ).textContent =
+          "No winner";
+
+
+        document.getElementById(
+          "winnerStats"
+        ).textContent =
+          "No leaderboard data available.";
+      }
+
+
+      /* -----------------------------------------------
+         LEADERBOARD
+         ----------------------------------------------- */
+
+      const list =
+        document.getElementById(
+          "leaderboardList"
+        );
+
+
+      list.innerHTML = "";
+
+
+      if (
+        leaderboard.length === 0
+      ) {
+
+        list.innerHTML = `
+          <div
+            style="
+              text-align:center;
+              padding:20px;
+              color:var(--color-text-dim);
+            "
+          >
+            No leaderboard data.
+          </div>
+        `;
+
         return;
       }
 
-      renderResults(result.leaderboard);
-      await applyMyStatsOnce(roundId, result.leaderboard, user.id);
-      if (result.leaderboard[0] && result.leaderboard[0].user_id === user.id) playSound("victory");
 
-      mountChatPanel(document.getElementById("chatPanel"), {
-        roomId: result.room_id, userId: user.id, username: (await window.supabaseClient.from("profiles").select("username").eq("id", user.id).single()).data.username,
-      });
+      leaderboard.forEach(
+        (row, i) => {
 
-      document.getElementById("loadingState").classList.add("hidden");
-      document.getElementById("resultsContent").classList.remove("hidden");
+          const div =
+            document.createElement(
+              "div"
+            );
+
+
+          div.className =
+            "leaderboard-row";
+
+
+          /*
+           * Highlight current player.
+           */
+
+          if (
+            row.user_id === currentUserId
+          ) {
+
+            div.classList.add(
+              "you-row"
+            );
+
+          }
+
+
+          const rank =
+            RANK_ICONS[i] ||
+            `${i + 1}.`;
+
+
+          div.innerHTML = `
+
+            <div class="rank">
+              ${rank}
+            </div>
+
+            <div>
+              <div class="lb-name">
+                ${escapeHTML(
+                  row.username ||
+                  "Unknown Player"
+                )}
+              </div>
+
+              <div class="lb-sub">
+                Kills: ${row.kills || 0}
+                ·
+                Deaths: ${row.deaths || 0}
+              </div>
+            </div>
+
+            <div class="lb-score">
+              ${row.score || 0}
+            </div>
+
+          `;
+
+
+          list.appendChild(
+            div
+          );
+
+        }
+      );
+
     }
 
-    function renderResults(leaderboard) {
-      const winner = leaderboard[0];
-      if (winner) {
-        document.getElementById("winnerName").textContent = winner.username;
-        document.getElementById("winnerStats").textContent =
-          `KILLS: ${winner.kills}  ·  DEATHS: ${winner.deaths}  ·  SCORE: ${winner.score}`;
+
+    /* =====================================================
+       ESCAPE HTML
+       ===================================================== */
+
+    function escapeHTML(value) {
+
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+
+    }
+
+
+    /* =====================================================
+       APPLY PROFILE STATS
+       ===================================================== */
+
+    async function applyMyStatsOnce(
+      roundId,
+      leaderboard,
+      userId
+    ) {
+
+      const flagKey =
+        "stats_applied_" +
+        roundId;
+
+
+      /*
+       * Don't apply stats twice if page
+       * is refreshed.
+       */
+
+      if (
+        sessionStorage.getItem(
+          flagKey
+        )
+      ) {
+
+        return;
       }
 
-      const list = document.getElementById("leaderboardList");
-      list.innerHTML = "";
-      leaderboard.forEach((row, i) => {
-        const div = document.createElement("div");
-        div.className = "leaderboard-row";
-        div.innerHTML = `
-          <div class="rank">${RANK_ICONS[i] || (i + 1) + "."}</div>
-          <div>
-            <div class="lb-name">${row.username}</div>
-            <div class="lb-sub">Kills: ${row.kills} · Deaths: ${row.deaths}</div>
-          </div>
-          <div class="lb-score">${row.score}</div>
-        `;
-        list.appendChild(div);
-      });
+
+      const mine =
+        leaderboard.find(
+          row =>
+            row.user_id === userId
+        );
+
+
+      if (!mine) {
+
+        console.warn(
+          "Current player not found in leaderboard."
+        );
+
+        return;
+      }
+
+
+      const won =
+        leaderboard.length > 0 &&
+        leaderboard[0].user_id === userId;
+
+
+      console.log(
+        "Applying profile stats:",
+        {
+          kills: mine.kills,
+          deaths: mine.deaths,
+          won
+        }
+      );
+
+
+      const {
+        error
+      } = await window.supabaseClient
+        .rpc(
+          "increment_profile_stats",
+          {
+            p_kills:
+              mine.kills || 0,
+
+            p_deaths:
+              mine.deaths || 0,
+
+            p_won:
+              won
+          }
+        );
+
+
+      if (error) {
+
+        console.error(
+          "Could not update profile stats:",
+          error
+        );
+
+        return;
+      }
+
+
+      sessionStorage.setItem(
+        flagKey,
+        "1"
+      );
+
+
+      console.log(
+        "Profile stats updated."
+      );
+
     }
 
-    /**
-     * Apply this round's kills/deaths (and a win, if applicable) to
-     * the current user's lifetime profile stats — exactly once,
-     * even if this page is refreshed.
-     */
-    async function applyMyStatsOnce(roundId, leaderboard, userId) {
-      const flagKey = "stats_applied_" + roundId;
-      if (sessionStorage.getItem(flagKey)) return;
 
-      const mine = leaderboard.find((r) => r.user_id === userId);
-      if (!mine) return;
-
-      const won = leaderboard[0] && leaderboard[0].user_id === userId;
-
-      const { error } = await window.supabaseClient.rpc("increment_profile_stats", {
-        p_kills: mine.kills,
-        p_deaths: mine.deaths,
-        p_won: won,
-      });
-
-      if (!error) sessionStorage.setItem(flagKey, "1");
-    }
+    /* =====================================================
+       START
+       ===================================================== */
 
     init();
+
   </script>
+
 </body>
 </html>
